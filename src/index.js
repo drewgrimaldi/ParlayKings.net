@@ -27,6 +27,16 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-10-20 10:03 AM ET",
+    notes: `TENNIS POLYMARKET PRICES NOW REACH THE RECORD. The Polymarket matcher was built for game sports: it fetches only events ending within about 16 hours of the pick's date and requires the event's end date to equal that date. Tournament tennis is listed differently - a match market opens when the tournament is listed and its end date sits at the tournament's scheduled end - so tennis prices were never fetched at all. On October 20, 17 of 20 logged picks carried a Polymarket line and the 3 without were all WTA, at a tournament (Ningbo) whose markets were live the whole time. The tennis path (ATP and WTA series) now fetches across a tournament window (3 days before to 14 days after the pick), matches the pick's date inside the event's start-to-end span, and allows player names in either order (the pick may carry "Guo Hanyu" where the market titles "Hanyu Guo"). One trap is guarded explicitly: the same pair can be listed twice in one tournament, as a Qualification event and as the main-draw event with the same stripped title and overlapping spans; the logger prefers the main-draw listing, then the latest-opened market, and stores nothing when two listings cannot be told apart. What did NOT change: game-sport matching keeps the strict same-day end-date gate and the game-day fetch window; both sides must still key exactly with the moneyline outcomes cross-checked; the liquidity gate's bars are unchanged; and the price's roles are unchanged - stored on the record for measurement and, where it qualifies, placed in front of the model before it decides. Tests: tests/polymarket-tennis.test.js (18 checks, built on the live Ningbo listings, including the Qualification collision); full suite green. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
+    date: "2026-10-19 10:17 PM ET",
+    notes: `THE MISSION IS IN THE PROMPT. A MISSION paragraph now sits directly under YOUR JOB in the system prompt: the model is competing against the market - the sportsbooks' odds and the Polymarket price, the house it plays against. Every prediction says one side is right and the other side is wrong; there is no third outcome and no credit for almost. Its job is to be right more often than the market is. The market prices placed in front of it before it decides are the benchmark to beat, not an answer to copy; the simulation, the track record, and its read of the matchup exist to find the games where the market's price is wrong, and to side with it where it is right. Instruction-only change: the simulation, the market fallback gate, calibration, and logging are untouched. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-19 9:29 PM ET",
     notes: `THE MARKET FALLBACK IS BACK. Measured before restored: across October 13-19 the logging fallback moved 47 picks; the 43 graded by tonight went 28-15 (65%) on the market favorite, while the model's original picks in those same games went 15-28 (35%). The fallback returns exactly as it ran in that stretch. The system-prompt MARKET ANCHOR rule is restored: with a market line available the favorite is the pick by default, and the other side may be taken only when it is priced at 45% implied or better and the sim's claimed edge over the market is 10 points or less. The deterministic logging gate (marketAnchorDecision) again moves an out-of-zone pick to the favorite before it is written, with the logged confidence set to the favorite's implied number floored at 51 and the record carrying the anchor note naming the favorite plus the sim's original side and number. Kept from the build earlier tonight: the qualified Polymarket price is also placed in front of the model before it decides (a hidden MARKET block), so the market is information first and a backstop second, and both snapshots stay on the record for measurement. Where the fallback earned it, from the same graded set: moves off an underdog priced under 35% implied went 15-3, moves onto a favorite priced at 70% implied or better went 13-3, moves in the 35-44% underdog band split 10-10, and NBA preseason moves went 3-6. The bars are restored unchanged; those splits are the evidence base if they are ever revisited. Deliberately unchanged: the simulation, 0.40 shrinkage, band calibration, the symmetric league-bias learner, and grading; moved NFL picks are again set at logging, as in the measured era. Tests: tests/market-anchor.test.js restored to its gate-era form (27 checks) with the Polymarket, liquidity-gate, and confidence-lock suites restored alongside; tests/market-info-block.test.js (12 checks) kept; full suite green. Model stays 1.7.2.`
   },
@@ -1774,6 +1784,8 @@ __name22222222222(manifestResponse, "manifestResponse");
 var SYSTEM_PROMPT = `You are ParlayKings, a sharp, direct AI assistant built for The Drew Grimaldi Podcast. Do not call yourself SAM. You answer questions on any topic \u2014 sports, news, general knowledge, writing help, whatever is asked. Don't steer conversations toward sports unless the user brings sports up.
 
 YOUR JOB: predict the correct winner of every sports matchup you're given as often as you possibly can. Accuracy on the winner call is the core measure of whether you're doing your job, not a side effect of running the numbers. This is the real goal, stated plainly \u2014 even on days it isn't hit. Do not round a coin-flip simulation up to 60-65% to sound like a favorite. The simulation split is the number you state and log. Calibration exists to keep that number honest, including leaving a 52-48 as 52-48. Treat this like a game you're actively trying to win, not a stat you passively report: most favorites clear 60-65% on their own with zero skill involved, so beating that is a real win \u2014 but that is a hit-rate target, not a license to write 64% on a 52% sim \u2014 landing 70-75% is considered a real win, and every single pick is a rep toward hitting that number, not something to hedge or explain away when you get there. Use the hidden TRACK RECORD and CONFIDENCE CALIBRATION context below \u2014 all of it pulled from your own logged Airtable history, including the final scores on your most recent graded picks \u2014 to actually find patterns and get more accurate over time, not as a one-time adjustment you apply and forget: a league running colder than its confidence band suggests, recent misses that were one-score coin flips versus genuine misevaluations (the final scores show you which), a type of matchup that's shown up before a real past loss, a type of matchup that keeps landing wrong. When you spot one, let it change how carefully you treat a similar-looking case in front of you right now.
+
+YOUR MISSION: you are competing against the market \u2014 the sportsbooks' odds and the Polymarket price. Every prediction you make says one side is right and the other side is wrong; there is no third outcome and no credit for almost. Your job is to be right more often than the market is. The market prices are placed in front of you before you decide so you always know exactly what you are competing against: they are the benchmark you have to beat, not an answer to copy. It is the house, and you are playing against the house. Your simulation, your track record, and your read of the matchup exist to find the games where the market's price is wrong \u2014 and to side with it where it is right.
 
 THE PROBLEM YOU EXIST TO SOLVE: most sports "predictions" people encounter are either uninformed gut takes with no real accountability, or content shaped by sportsbooks and gambling odds that have their own financial incentives (balancing their book, not necessarily being right). Neither is trustworthy. Your entire reason for existing is to be the alternative: a real, computed Monte Carlo simulation run on live, independently-verified stats \u2014 never odds, never invented data, never a vibes-based guess dressed up as analysis \u2014 with an honest, self-correcting track record instead of unearned confidence. The goal is simple to state and hard to fake: be right, and be right exactly as often as you say you will be \u2014 the second half of that isn't a softer, lesser version of the first, it's what keeps the first one honest, since a stated confidence you can't back up with a real hit rate isn't actually being right, it's just sounding right. Every rule below exists in service of that, and when a rule doesn't obviously cover a specific situation, fall back to this: would a real analyst with real data, real accountability, and no incentive to mislead say this? Concretely, that means three things matter more than anything else. (1) Verify before you speak: if it can't be confirmed as real, decline plainly rather than estimate around it \u2014 a confident-sounding guess is worse than an honest "I can't verify this," not better. (2) Be calibrated, not just confident: your stated win% should reflect your actual historical hit rate at that confidence level, not just how the simulation happened to come out \u2014 see the TRACK RECORD and CONFIDENCE CALIBRATION context below, and use it. (3) Show your work: name the real players, stats, and factors that actually drove a pick, so someone could check your reasoning against the same public data you used, rather than just handing down a verdict.
 
@@ -12490,6 +12502,70 @@ function polymarketEventDateET(event) {
   if (isNaN(d.getTime())) return "";
   try { return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); } catch { return ""; }
 }
+function polymarketEventSpanContainsET(event, dateET) {
+  // Tennis tournaments run for days: a match market is created when
+  // the tournament is listed (startDate) and its endDate sits at the
+  // tournament's scheduled end, so a match played mid-tournament
+  // never satisfies the same-day endDate gate the game sports use
+  // (Ningbo 2026: an Oct 20 match carried an Oct 26 endDate and was
+  // never stored). For tennis the date check is span containment:
+  // the pick's ET date must fall inside the event's [startDate,
+  // endDate] ET span, inclusive.
+  if (!event || !dateET) return false;
+  const start = new Date(event.startDate || event.endDate || "");
+  const end = new Date(event.endDate || event.startDate || "");
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+  const et = (d) => { try { return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); } catch { return ""; } };
+  const s = et(start), e = et(end);
+  return !!s && !!e && s <= dateET && dateET <= e;
+}
+function polymarketPlayerKeysMatch(k1, k2) {
+  // Player names only (the tennis path): sources disagree on name
+  // ORDER - the pick may carry "Guo Hanyu" (family name first, as
+  // ESPN lists her) while Polymarket titles the market "Hanyu Guo".
+  // Same tokens, any order, matches; anything else does not. Kept
+  // off the team path on purpose: team names never match by token
+  // shuffle.
+  if (!k1 || !k2) return false;
+  const a = k1.split(" ").filter(Boolean), b = k2.split(" ").filter(Boolean);
+  if (a.length < 2 || a.length !== b.length) return false;
+  const sa = [...a].sort(), sb = [...b].sort();
+  return sa.every((tok, i) => tok === sb[i]);
+}
+function polymarketTournamentWindow(dateET) {
+  // Tennis fetch window: tournament markets open days before the
+  // match and their endDate sits at the tournament's end, so the
+  // +/-16h game-day window (keyed on endDate) never returns them.
+  // Fetch the series across the tournament span instead: from 3
+  // days before the pick's day to 14 days after, still endDate-
+  // bounded server-side so the series' unrelated markets stay out.
+  const center = Date.parse(String(dateET || "") + "T16:00:00Z");
+  if (!Number.isFinite(center)) return null;
+  return {
+    min: new Date(center - (3 * 24 + 16) * 3600 * 1000).toISOString(),
+    max: new Date(center + (14 * 24 + 16) * 3600 * 1000).toISOString()
+  };
+}
+function pickPolymarketCandidate(cands) {
+  // Tennis disambiguation: the same pair can be listed twice inside
+  // one tournament - a Qualification event and the main-draw event
+  // carry the same colon-stripped title and overlapping spans
+  // (Ningbo 2026: Snigur vs Kawa existed as both). Prefer a
+  // non-Qualification listing; among equals prefer the latest
+  // startDate (the main-draw market opens after qualifying). A
+  // true tie is ambiguous: return null and store nothing rather
+  // than guess which market priced the match.
+  if (!Array.isArray(cands) || !cands.length) return null;
+  if (cands.length === 1) return cands[0].snap;
+  const isQual = (c) => /qualification/i.test(String((c.event && c.event.title) || ""));
+  const main = cands.filter((c) => !isQual(c));
+  const pool = main.length ? main : cands;
+  if (pool.length === 1) return pool[0].snap;
+  const started = (c) => Date.parse((c.event && c.event.startDate) || "") || 0;
+  const sorted = [...pool].sort((x, y) => started(y) - started(x));
+  if (started(sorted[0]) > started(sorted[1])) return sorted[0].snap;
+  return null;
+}
 function evaluatePolymarketLiquidityGate(market, thresholds) {
   // Liquidity gate for the anchor's market of record (2026-10-16): a
   // Polymarket price may DRIVE the market anchor only when the market
@@ -12573,28 +12649,42 @@ function polymarketTeamKeysMatch(k1, k2) {
   }
   return false;
 }
-function polymarketSnapFromEvent(event, teamA, teamB, winnerName, dateET) {
+function polymarketSnapFromEvent(event, teamA, teamB, winnerName, dateET, opts) {
   // Strict matching, grading-law style: the event title must be exactly
   // "Team A vs Team B" for THIS matchup (prop events carry suffixed
   // titles and fail here), the event's ET date must equal the pick's
   // date, and the moneyline market's two outcomes must be those teams.
   // Anything looser returns null and the caller falls back.
+  // Tennis (opts.tennis) adjusts exactly two rules for how tournament
+  // markets are actually listed: the date check becomes span
+  // containment (the match falls inside the event's start-end span),
+  // and player names may match in either name order. Every other
+  // guard - both sides keyed, moneyline outcomes cross-checked,
+  // liquidity gate - is unchanged, and the game sports never take
+  // this path.
+  const tennis = !!(opts && opts.tennis);
+  const keysMatch = tennis
+    ? (x, y) => polymarketTeamKeysMatch(x, y) || polymarketPlayerKeysMatch(x, y)
+    : polymarketTeamKeysMatch;
   if (!event || !teamA || !teamB || !winnerName) return null;
-  if (dateET && polymarketEventDateET(event) !== dateET) return null;
+  if (dateET) {
+    const dateOk = tennis ? polymarketEventSpanContainsET(event, dateET) : polymarketEventDateET(event) === dateET;
+    if (!dateOk) return null;
+  }
   const parts = String(event.title || "").split(/\s+vs\.?\s+/i);
   if (parts.length !== 2) return null;
   const t0 = polymarketTitleSideKey(parts[0]);
   const t1 = polymarketTitleSideKey(parts[1]);
   const a = polymarketTeamKey(teamA);
   const b = polymarketTeamKey(teamB);
-  if (!((polymarketTeamKeysMatch(t0, a) && polymarketTeamKeysMatch(t1, b)) || (polymarketTeamKeysMatch(t0, b) && polymarketTeamKeysMatch(t1, a)))) return null;
+  if (!((keysMatch(t0, a) && keysMatch(t1, b)) || (keysMatch(t0, b) && keysMatch(t1, a)))) return null;
   const markets = Array.isArray(event.markets) ? event.markets : [];
   let mkt = markets.find((m) => String(m.sportsMarketType || "").toLowerCase() === "moneyline");
   if (!mkt) {
     mkt = markets.find((m) => {
       try {
         const o = JSON.parse(m.outcomes || "[]");
-        return o.length === 2 && polymarketTeamKeysMatch(polymarketTeamKey(o[0]), t0) && polymarketTeamKeysMatch(polymarketTeamKey(o[1]), t1);
+        return o.length === 2 && keysMatch(polymarketTeamKey(o[0]), t0) && keysMatch(polymarketTeamKey(o[1]), t1);
       } catch { return false; }
     });
   }
@@ -12612,8 +12702,8 @@ function polymarketSnapFromEvent(event, teamA, teamB, winnerName, dateET) {
   if (!Number.isFinite(implied[0]) || !Number.isFinite(implied[1])) return null;
   const wKey = polymarketTeamKey(winnerName);
   let wi = -1;
-  if (polymarketTeamKeysMatch(wKey, polymarketTeamKey(outcomes[0]))) wi = 0;
-  else if (polymarketTeamKeysMatch(wKey, polymarketTeamKey(outcomes[1]))) wi = 1;
+  if (keysMatch(wKey, polymarketTeamKey(outcomes[0]))) wi = 0;
+  else if (keysMatch(wKey, polymarketTeamKey(outcomes[1]))) wi = 1;
   if (wi === -1) return null;
   const gate = evaluatePolymarketLiquidityGate(mkt);
   return {
@@ -12659,7 +12749,16 @@ async function fetchPolymarketSnap(env, pick) {
     const teams = String(pick.matchup).split(/\s+vs\.?\s+/i);
     if (teams.length !== 2) return null;
     const dateET = pick.eventDate || todayET();
-    const win = polymarketDayWindow(dateET);
+    // Tennis plays inside multi-day tournaments: its markets are
+    // fetched across the tournament window and matched by span
+    // (see the helpers above), and every candidate is collected so
+    // a Qualification/main-draw double listing can be resolved
+    // instead of first-match-wins. Game sports keep the game-day
+    // window and first-match behavior exactly as before.
+    const leagueKey = String(pick.league || "").toUpperCase();
+    const isTennis = leagueKey === "ATP" || leagueKey === "WTA" || leagueKey === "TENNIS";
+    const win = isTennis ? polymarketTournamentWindow(dateET) : polymarketDayWindow(dateET);
+    const tennisCands = [];
     for (const series of seriesList) {
       let events = null;
       const cacheKey = series + ":" + dateET;
@@ -12679,12 +12778,17 @@ async function fetchPolymarketSnap(env, pick) {
         _polymarketEventsCache.set(cacheKey, { at: Date.now(), events });
       }
       for (const ev of Array.isArray(events) ? events : []) {
-        const snap = polymarketSnapFromEvent(ev, teams[0], teams[1], pick.winner, dateET);
+        const snap = polymarketSnapFromEvent(ev, teams[0], teams[1], pick.winner, dateET, isTennis ? { tennis: true } : undefined);
         if (snap) {
+          if (isTennis) { tennisCands.push({ snap, event: ev }); continue; }
           pick._polymarket = snap;
           return snap;
         }
       }
+    }
+    if (isTennis) {
+      const chosen = pickPolymarketCandidate(tennisCands);
+      if (chosen) { pick._polymarket = chosen; return chosen; }
     }
     return null;
   } catch (e) {
