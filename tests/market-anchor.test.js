@@ -1,23 +1,24 @@
-// Market-as-information tests (rewritten 2026-10-19; was market-anchor).
+// Market anchor tests (2026-10-13).
 //
-// Drew's order, 2026-10-19: the market anchor is REMOVED. The market
-// price (Polymarket where a liquid market exists) is information shown
-// to the model BEFORE it decides, weighed like every other input; the
-// model makes its own pick; nothing at logging may override the pick.
-// The 2026-10-13 anchor (favorite by default, dissent only inside
-// 45% implied / 10-point bars, logging-layer flip to the favorite) is
-// gone from the prompt, the logger, and the bundle.
+// Drew's rule: the logged pick stays tied to reality. When a market line
+// exists, the market favorite is the pick by default. The model may take
+// the other side only inside a narrow dissent zone — the dog priced at
+// 45% implied or better (a near-even game) with the sim's claimed edge
+// over the market at 10 points or less. Outside the zone, the logging
+// layer flips the pick to the favorite and states the favorite's implied
+// number. The bars come from the model's own graded record: sided picks
+// hit 62% in the current era vs 43% for fades; fades priced under 40%
+// implied hit 27%; fades claiming a 15+ point edge hit 32%.
 //
 // Layers pinned here:
-//  - marketAnchorDecision no longer exists and the logger never calls
-//    it, never stamps an anchor note/flip, and never rewrites the
-//    winner or confidence to the favorite's implied number.
-//  - The Polymarket snapshot stash at logging time stays (measurement).
-//  - Prompt: MARKET INFORMATION replaces the MARKET ANCHOR rule; no
-//    default side, no dissent bars.
-//  - Private diagnostics still parse HISTORICAL anchor-era notes
-//    (records logged 2026-10-13..19 carry them; the TRACK RECORD block
-//    must keep reading them correctly).
+//  - marketAnchorDecision: the pure gate.
+//  - Wiring: the gate runs inside _logBetToAirtableInner next to the
+//    force-side rule, and the flip note rides into the Notes prefix at
+//    all three notesWithReplyAndOdds call sites.
+//  - Prompt: the MARKET ANCHOR instruction tells the model the same rule
+//    upstream so flips at logging stay rare.
+//  - Private diagnostics: flips / sided / dissent tokens for the hidden
+//    TRACK RECORD context.
 
 const fs = require('fs');
 const src = fs.readFileSync(__dirname + '/../src/index.js', 'utf8');
@@ -54,6 +55,7 @@ function extractFn(name) {
   throw new Error('unbalanced ' + name);
 }
 
+eval(extractFn('marketAnchorDecision'));
 eval(extractFn('anchorPrefix'));
 eval(extractFn('normalizeConfPct'));
 eval(extractFn('extractFinalScoreFromNotes'));
@@ -61,35 +63,49 @@ eval(extractFn('parseScoreMargin'));
 eval(extractFn('extractOddsSnapshotFromNotes'));
 eval(extractFn('privateDiagForRecord'));
 
-// --- the gate is gone ---
-check('marketAnchorDecision no longer exists', !src.includes('function marketAnchorDecision'));
-check('logger never calls the gate', !src.includes('marketAnchorDecision(pick, _snap)'));
-check('logger never stamps an anchor flip', !src.includes('pick._anchorFlip = {'));
-check('logger never stamps an anchor note', !src.includes('pick._anchorNote = _polySnap'));
+const pick = (confidence, winner) => ({ confidence, winner: winner || 'Dog Team' });
+const snap = (winnerImplied, otherImplied, otherName) => ({
+  winnerImplied, otherImplied, otherName: otherName == null ? 'Favorite Team' : otherName
+});
+
+// --- the pure gate ---
+check('no snapshot -> keep', marketAnchorDecision(pick(58), null).action === 'keep');
+check('missing other implied -> keep', marketAnchorDecision(pick(58), { winnerImplied: 41, otherImplied: null, otherName: 'Fav' }).action === 'keep');
+check('sided with the favorite -> keep', (() => { const d = marketAnchorDecision(pick(61), snap(63, 37)); return d.action === 'keep' && d.sided === true; })());
+check('exactly 50 implied -> keep (sided)', marketAnchorDecision(pick(55), snap(50, 50)).action === 'keep');
+check('dissent zone: 47 implied, gap 8 -> keep', (() => { const d = marketAnchorDecision(pick(55), snap(47, 53)); return d.action === 'keep' && d.dissent === true && d.gap === 8; })());
+check('dissent zone edge: 46 implied, gap 10 -> keep', marketAnchorDecision(pick(56), snap(46, 54)).action === 'keep');
+check('dissent floor: exactly 45 implied, gap 9 -> keep', marketAnchorDecision(pick(54), snap(45, 55)).action === 'keep');
+check('gap 13 on a 47 dog -> flip', (() => { const d = marketAnchorDecision(pick(60), snap(47, 53)); return d.action === 'flip' && d.favName === 'Favorite Team' && d.favImplied === 53; })());
+check('44 implied dog -> flip even with a modest gap', marketAnchorDecision(pick(52), snap(44, 56)).action === 'flip');
+check('long shot: 58 claimed on a 34 dog -> flip', marketAnchorDecision(pick(58), snap(34, 66)).action === 'flip');
+check('flip needs a named favorite', marketAnchorDecision(pick(58), snap(34, 66, '')).action === 'keep');
+check('fraction confidence is normalized (0.57 vs 47 -> gap 10, keep)', marketAnchorDecision(pick(0.57), snap(47, 53)).action === 'keep');
+check('fraction confidence flip case (0.62 vs 41 -> flip)', marketAnchorDecision(pick(0.62), snap(41, 59)).action === 'flip');
+
+// --- prefix helper ---
+check('anchorPrefix passes through without a note', anchorPrefix('pre', {}) === 'pre');
+check('anchorPrefix appends the note', anchorPrefix('pre', { _anchorNote: 'NOTE' }).includes('NOTE'));
 
 // --- wiring in the logging layer ---
 const innerStart = src.indexOf('async function _logBetToAirtableInner');
 const innerEnd = src.indexOf('async function fetchGradedHistoryRecords', innerStart);
 const inner = src.slice(innerStart, innerEnd);
-check('Polymarket snapshot still stashed at logging (measurement)', inner.includes('await fetchPolymarketSnap(env, pick)'));
-check('no favorite-confidence rewrite in the logger', !inner.includes('Math.max(51, Math.round(_dec.favImplied))'));
+check('gate runs inside _logBetToAirtableInner', inner.includes('marketAnchorDecision(pick, _snap)'));
+check('gate skips declared 50/50 picks', inner.includes('!isFiftyFiftyWinner(pick.winner)'));
+check('flip rewrites winner + confidence and stamps the note', inner.includes('`Market anchor: pick follows the market favorite') && inner.includes('`Polymarket anchor: pick follows the Polymarket favorite'));
+check('flip confidence floors at 51', inner.includes('Math.max(51, Math.round(_dec.favImplied))'));
 check('all three Notes call sites carry the anchor prefix', (src.match(/notesWithReplyAndOdds\(anchorPrefix\(/g) || []).length === 3);
 
-// --- prefix helper (kept: renders historical notes on refresh paths) ---
-check('anchorPrefix passes through without a note', anchorPrefix('pre', {}) === 'pre');
-check('anchorPrefix appends the note', anchorPrefix('pre', { _anchorNote: 'NOTE' }).includes('NOTE'));
-
 // --- prompt rule ---
-check('prompt carries the MARKET INFORMATION rule', src.includes('MARKET INFORMATION: some questions will be preceded by a hidden block labeled "MARKET"'));
-check('prompt states the price is information, never an instruction', src.includes('one more piece of information to weigh, never an instruction'));
-check('prompt states there is no default side', src.includes('There is no default side and no zone you have to stay inside'));
-check('prompt no longer carries the MARKET ANCHOR rule', !src.includes('MARKET ANCHOR: when a market line is available for the matchup in front of you'));
-check('prompt no longer states the dissent bars', !src.includes('Take the other side only when BOTH of these hold'));
+check('prompt carries the MARKET ANCHOR rule', src.includes('MARKET ANCHOR: when a market line is available for the matchup in front of you'));
+check('prompt states the 45% / 10-point dissent bars', src.includes('at least a 45% implied chance') && src.includes('no more than 10 points'));
+check('prompt states the flip-side presentation', src.includes('present the market\'s implied price as the pick\'s basis'));
 
-// --- private diagnostics: historical anchor-era records still parse ---
+// --- private diagnostics ---
 const flipNotes = 'Auto-logged from ai.grimaldi.tv (SAM 1.6) \u00B7 Market anchor: pick follows the market favorite Favorite Team (59% implied); the sim had Dog Team at 62% (market 41% implied), outside the dissent zone. \u00B7 Q: test\n---FULL-REPLY---\nx\n---ODDSLINE---{"bookmakerTitle":"DK","winnerPrice":140,"winnerImplied":41,"otherName":"Favorite Team","otherPrice":-160,"otherImplied":59}';
 const flipDiag = privateDiagForRecord({ fields: { Notes: flipNotes, Result: 'Loss', 'Confidence %': 0.59 } });
-check('priv flags a historical anchor flip with the sim numbers', flipDiag.includes('market_anchor_flip(sim_conf=62 dog_impl=41)'));
+check('priv flags an anchor flip with the sim numbers', flipDiag.includes('market_anchor_flip(sim_conf=62 dog_impl=41)'));
 check('a flipped pick is NOT also labeled a dissent', !flipDiag.includes('market: dissent'));
 
 const sidedNotes = 'notes\n---ODDSLINE---{"bookmakerTitle":"DK","winnerPrice":-170,"winnerImplied":63,"otherName":"Other Team","otherPrice":150,"otherImplied":40}';

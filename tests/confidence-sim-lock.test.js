@@ -83,10 +83,12 @@ function loggedFields(tag, sim) {
   // ever writes the honest 50/50 coin-flip values), or the sanctioned
   // non-tennis force-side (forceNonTennisSide, which only ever writes 51%
   // for the higher sim side — Drew's standing rule, no non-tennis 50/50s),
-  // (The market-anchor flip that used to be a sanctioned site here was
-  // removed 2026-10-19 at Drew's order: the market price is information
-  // for the model before it decides, and nothing at logging may rewrite
-  // the pick or its number.)
+  // or the sanctioned market-anchor flip inside _logBetToAirtableInner
+  // (Drew's market-anchor rule, 2026-10-13: when a pick fades the market
+  // outside the narrow dissent zone, the logged pick flips to the market
+  // favorite and the confidence becomes the favorite's implied number,
+  // floored at 51 — the pick's basis is the market, so its number is the
+  // market's, stated openly in the record's anchor note).
   // The calibration block is a deliberate bounded exception: sim lock sets the
   // number first, then band calibration may pull it DOWN toward the band's
   // historical hit rate — never up (down-only clamp inside
@@ -105,7 +107,18 @@ function loggedFields(tag, sim) {
     calEnd = i;
   }
   const calBlock = calStart >= 0 ? src.slice(calStart, calEnd) : '';
-  eq(src.includes('marketAnchorDecision(pick'), false, 'market-anchor gate is gone from the bundle');
+  const anchorComment = src.indexOf('// Market anchor (2026-10-13): keep the logged pick');
+  eq(anchorComment >= 0, true, 'market-anchor gate block present in the logger');
+  let anchorRange = { start: -2, end: -1 };
+  if (anchorComment >= 0) {
+    const ifStart = src.indexOf('if (pick && !isFiftyFiftyWinner(pick.winner)) {', anchorComment);
+    let i = src.indexOf('{', ifStart), depth = 0;
+    for (; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      if (src[i] === '}') { depth--; if (!depth) break; }
+    }
+    anchorRange = { start: ifStart, end: i };
+  }
   eq(/calibratedConfidence > rawConfidence/.test(calBlock), false, 'down-only clamp is gone from the calibration block');
   eq(/var BAND_CALIBRATION_MAX_SHIFT_PTS/.test(src), false, 'symmetric clamp bound removed from bundle');
   const writes = [];
@@ -128,9 +141,9 @@ function loggedFields(tag, sim) {
     }
     defRange = { start: ifStart, end: i };
   }
-  const allowed = lockRanges.concat([{ start: calStart, end: calEnd }, defRange]);
+  const allowed = lockRanges.concat([{ start: calStart, end: calEnd }, anchorRange, defRange]);
   const strays = writes.filter((k) => !allowed.some((r) => k > r.start && k < r.end));
-  eq(strays.length, 0, 'no pick.confidence rewrite outside sim lock + calibration + fifty stand + NFL deflation');
+  eq(strays.length, 0, 'no pick.confidence rewrite outside sim lock + calibration + fifty stand + market anchor + NFL deflation');
 
   console.log(pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -50,6 +50,7 @@ eval(extractFn('polymarketTeamKeysMatch'));
 eval(src.match(/const POLYMARKET_NAME_DISTINGUISHERS[^;]+;/)[0].replace('const POLYMARKET_NAME_DISTINGUISHERS', 'globalThis.POLYMARKET_NAME_DISTINGUISHERS'));
 eval(extractFn('polymarketSnapFromEvent'));
 eval(extractFn('polymarketDayWindow'));
+eval(extractFn('marketAnchorDecision'));
 eval(extractFn('appendPolymarketSnapshotToNotes'));
 
 const GAME = {
@@ -80,7 +81,14 @@ check('late-night UTC start maps to same ET date', polymarketEventDateET({ start
 
 
 
-// --- the anchor gate is gone (2026-10-19): snaps inform, never override ---
+// --- the gate runs on Polymarket snaps with the same bars ---
+const flip = marketAnchorDecision({ winner: 'Miami Dolphins', confidence: 60 }, s2);
+check('polymarket snap flips a wild fade', flip.action === 'flip' && flip.favName === 'Buffalo Bills' && flip.favImplied === 62);
+const dissentSnap = { winnerImplied: 47, otherImplied: 53, otherName: 'Buffalo Bills' };
+const dissent = marketAnchorDecision({ winner: 'Miami Dolphins', confidence: 52 }, dissentSnap);
+check('polymarket snap keeps an in-zone dissent', dissent.action === 'keep' && dissent.dissent === true);
+const sided = marketAnchorDecision({ winner: 'Buffalo Bills', confidence: 58 }, s1);
+check('polymarket snap keeps a sided pick', sided.action === 'keep' && sided.sided === true);
 
 // --- storage ---
 const notes = appendPolymarketSnapshotToNotes('notes', s1);
@@ -88,9 +96,9 @@ check('POLYLINE stores winner orientation + slug', notes.includes('---POLYLINE--
 
 // --- wiring in the bundle ---
 check('logger stashes the Polymarket price at logging time', src.includes('await fetchPolymarketSnap(env, pick)') && src.includes('polymarket stash failed'));
-check('no anchor gate remains in the logger', !src.includes('marketAnchorDecision(pick, _snap)') && !src.includes('pick._anchorFlip = {'));
-check('market info block is built for the model before it decides', src.includes('marketBlock = await buildMarketInfoBlock(env, message'));
-check('info block shows only liquidity-qualified prices', src.includes('snap && snap.anchorQualified'));
+check('anchor reads the stashed Polymarket snap first (liquidity-gated)', src.includes('let _snap = pick._polymarket && pick._polymarket.anchorQualified !== false ? pick._polymarket : null;'));
+check('sportsbook text parse remains the fallback', src.includes('_snap = parseOpeningLineFromText(fullReplyText);'));
+check('flip note names Polymarket when it drove the flip', src.includes('Polymarket anchor: pick follows the Polymarket favorite'));
 check('polyline stored on every pick (re-oriented + marked on flips)', src.includes('const poly = flipped ? reorientSnapshotForFlip(pick._polymarket, pick._anchorFlip) : pick._polymarket;'));
 check('series map covers the slate leagues', src.includes('NFL: [12185]') && src.includes('NCAAF: [12756]') && src.includes('WNBA: [10105]') && src.includes('UFC: [38]') && src.includes('TENNIS: [10365, 10366]'));
 check('fetch fails open to null', src.includes('polymarket fetch failed'));

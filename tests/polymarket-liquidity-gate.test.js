@@ -101,9 +101,9 @@ check('priv regex matches the Polymarket flip note', !!polyNote.match(anchorRe))
 const pm = polyNote.match(anchorRe);
 check('priv regex extracts sim conf + dog implied from a Polymarket note', !!pm && pm[1] === '53' && pm[2] === '40');
 
-// --- Wiring: only qualified prices reach the model as information; the report port matches
-check('the pre-decision info block is qualification-gated', src.includes('snap && snap.anchorQualified'));
-check('no flip context is stashed anymore (anchor removed 2026-10-19)', !src.includes('pick._anchorFlip = {'));
+// --- Wiring: the anchor uses Polymarket only when qualified; the report port matches
+check('anchor source selection is qualification-gated', src.includes('pick._polymarket.anchorQualified !== false'));
+check('flip context is stashed for re-orientation', src.includes('pick._anchorFlip = {'));
 const py = fs.readFileSync(__dirname + '/../../daily_record.py', 'utf8');
 check('daily_record.py ANCHOR_RE covers Polymarket flips', py.includes('Polymarket anchor: pick follows the Polymarket favorite'));
 
