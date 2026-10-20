@@ -1,0 +1,12 @@
+{
+	"$schema": "https://developers.cloudflare.com/workers/wrangler/configuration/",
+	"name": "ai",
+	"main": "src/index.js",
+	"compatibility_date": "2026-08-04",
+	"kv_namespaces": [{ "binding": "SAM_BETS", "id": "de1fea6598a74ff2820fcf4bb930933c" }],
+	"r2_buckets": [{ "binding": "AVATARS", "bucket_name": "parlaykings-avatars" }],
+	"browser": { "binding": "BROWSER" },
+	"send_email": [{ "name": "EMAIL" }],
+	"observability": { "enabled": true },
+	"triggers": { "crons": ["*/5 * * * *"] }
+}

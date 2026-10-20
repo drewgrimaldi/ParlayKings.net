@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>live.grimaldi.tv | THE DREW GRIMALDI PODCAST</title>
+  <meta name="description" content="Watch THE DREW GRIMALDI PODCAST live on Cloudflare Stream. Saturdays at 11AM EST.">
+  <link rel="canonical" href="https://live.grimaldi.tv/">
+  <meta property="og:url" content="https://live.grimaldi.tv/">
+  <meta property="og:title" content="live.grimaldi.tv | THE DREW GRIMALDI PODCAST">
+  <meta property="og:description" content="Live Cloudflare Stream broadcast. Saturdays at 11AM EST.">
+  <meta property="og:image" content="https://live.grimaldi.tv/assets/grimaldi-logo-flag.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/assets/grimaldi-logo-flag.jpg">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260901-navblue">
+</head>
+<body>
+  <header id="grimaldi-unified-nav">
+    <button class="menu-toggle-btn" type="button" aria-label="Open Navigation Menu" onclick="toggleGrimaldiMenu(true)">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
+      </svg>
+    </button>
+    <a href="https://grimaldi.tv/" id="grimaldi-nav-logo">
+      <img src="/assets/grimaldi-logo-flag.jpg" alt="GRIMALDI.TV">
+    </a>
+  </header>
+
+  <a href="https://mypillow.com/GRIM" target="_blank" rel="noopener noreferrer" id="static-promo-banner">
+    USE PROMO CODE: <strong>GRIM</strong> AT MYPILLOW.COM FOR MAXIMUM DISCOUNTS
+  </a>
+
+  <div id="grimaldiMenuBackdrop" onclick="toggleGrimaldiMenu(false)"></div>
+  <aside id="grimaldiMenuDrawer">
+    <div class="drawer-header">
+      <span class="drawer-title">MENU</span>
+      <button class="drawer-close-btn" type="button" onclick="toggleGrimaldiMenu(false)">✕</button>
+    </div>
+    <nav class="drawer-nav">
+      <div class="drawer-section-title">THE DREW GRIMALDI PODCAST</div>
+      <a href="https://grimaldi.tv/" class="grit-nav-link">HOME</a>
+      <a href="https://live.grimaldi.tv/" class="grit-nav-link active-channel">⭐ LIVE BROADCAST</a>
+      <a href="https://grimaldi.tv/Episodes" class="grit-nav-link">EPISODES</a>
+      <a href="https://grimaldi.tv/FunnyPhotos" class="grit-nav-link">PHOTO GALLERY</a>
+      <a href="https://grimaldi.tv/Blog" class="grit-nav-link">BLOG</a>
+      <a href="https://grimaldi.tv/Store" class="grit-nav-link">PODCAST MERCHANDISE</a>
+      <a href="https://vault.grimaldi.tv/" class="grit-nav-link">CLIP VAULT</a>
+      <a href="https://grimaldi.tv/PressEvents" class="grit-nav-link">PRESS &amp; UPCOMING GUESTS</a>
+
+      <div class="drawer-section-title">SPORTS</div>
+      <a href="https://ai.grimaldi.tv/" target="_blank" rel="noopener noreferrer" class="grit-nav-link">⭐ LAUNCH SPORTS ANALYZER</a>
+      <a href="https://football.grimaldi.tv/" class="grit-nav-link">FOOTBALL (NCAAF/NFL)</a>
+      <a href="https://mlb.grimaldi.tv/" class="grit-nav-link">BASEBALL (MLB)</a>
+      <a href="https://basketball.grimaldi.tv/" class="grit-nav-link">Basketball</a>
+      <a href="https://ufc.grimaldi.tv/" class="grit-nav-link">UFC / MMA</a>
+      <a href="https://wnba.grimaldi.tv/" class="grit-nav-link">WNBA</a>
+      <a href="https://tennis.grimaldi.tv/" class="grit-nav-link">TENNIS (ATP/WTA)</a>
+      <a href="https://trivia.grimaldi.tv/" class="grit-nav-link">TRIVIA</a>
+    </nav>
+  </aside>
+
+  <main class="main-stage-container">
+    <div class="broadcast-top-meta">
+      <div class="live-indicator-cluster">
+        <span id="liveStatusBadge" class="badge-live-pulse hidden"></span>
+        <span id="watcherCount" class="watcher-count hidden" aria-live="polite">
+          <svg class="watcher-eye" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <circle cx="12" cy="12" r="3" fill="currentColor"/>
+          </svg>
+          <strong id="watcherCountNum">0</strong>
+          <span>watchers</span>
+        </span>
+        <span class="badge-stream-metric">Saturdays @ 11AM EST</span>
+      </div>
+      <div class="stream-controls-quick">
+        <button class="btn-pill" type="button" onclick="toggleTheaterMode()">Theater Mode</button>
+        <button class="btn-pill" type="button" onclick="shareStream()">Share</button>
+      </div>
+    </div>
+
+    <div id="broadcastGrid" class="broadcast-grid">
+      <div class="player-col">
+        <div class="player-outer-wrapper">
+          <div class="player-aspect-ratio" id="playerAspectBox">
+            <iframe
+              id="cloudflareStreamPlayer"
+              class="hidden"
+              title="Cloudflare Stream Player - The Drew Grimaldi Podcast"
+              allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+              allowfullscreen
+            ></iframe>
+            <video
+              id="standbyLoop"
+              class="standby-loop"
+              src="/assets/intro-video.mp4"
+              poster="/assets/starting-soon.jpg"
+              autoplay
+              muted
+              loop
+              playsinline
+            ></video>
+            <div id="standbyScreen" class="standby-screen active">
+              <div class="standby-copy">
+                <div class="standby-title">NEXT BROADCAST</div>
+                <p class="standby-desc">THE DREW GRIMALDI PODCAST — Saturdays at 11AM EST.</p>
+              </div>
+              <div class="countdown-timer-box">
+                <div class="time-card"><div class="time-val" id="cntDays">00</div><div class="time-lbl">Days</div></div>
+                <div class="time-card"><div class="time-val" id="cntHours">00</div><div class="time-lbl">Hours</div></div>
+                <div class="time-card"><div class="time-val" id="cntMins">00</div><div class="time-lbl">Mins</div></div>
+                <div class="time-card"><div class="time-val" id="cntSecs">00</div><div class="time-lbl">Secs</div></div>
+              </div>
+              <button id="standbySoundBtn" class="btn-pill" type="button" onclick="toggleStandbySound()">Sound on</button>
+            </div>
+          </div>
+          <div class="player-meta-bar">
+            <div class="player-title-info">
+              <h2 id="streamTitleDisplay">THE DREW GRIMALDI PODCAST</h2>
+              <p id="streamSubtitleDisplay">Saturdays @ 11AM EST</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="stream-chat-col">
+        <div class="chat-tabs-header">
+          <button class="chat-tab-btn active" data-chat-tab="chat" type="button">Live Chat</button>
+          <button class="chat-tab-btn" data-chat-tab="watch" type="button">Watch Also</button>
+        </div>
+        <div class="chat-body-container">
+          <div id="chat-tab-chat" class="chat-tab-content active">
+            <div id="chatMessagesContainer" class="chat-messages-scroll"></div>
+            <div class="chat-input-wrapper">
+              <input id="chatInputField" class="chat-input-field" type="text" maxlength="240" placeholder="Say something in chat...">
+              <button class="btn-send-chat" type="button" onclick="sendChatMessage()">Send</button>
+            </div>
+          </div>
+          <div id="chat-tab-watch" class="chat-tab-content">
+            <div class="watch-also-scroll">
+              <p class="watch-also-desc">Same show, other platforms. Studio publishes to Cloudflare Stream, then out to YouTube and Rumble.</p>
+              <a class="platform-btn" href="https://www.youtube.com/@thedrewgrimaldipodcast" target="_blank" rel="noopener noreferrer">YouTube</a>
+              <a class="platform-btn" href="https://rumble.com/DrewGrimaldi" target="_blank" rel="noopener noreferrer">Rumble</a>
+              <a class="platform-btn" href="https://x.com/Grimillionaire" target="_blank" rel="noopener noreferrer">X @Grimillionaire</a>
+              <a class="platform-btn" href="https://podcasts.apple.com/us/podcast/the-drew-grimaldi-podcast/id1655465436" target="_blank" rel="noopener noreferrer">Apple Podcasts</a>
+              <a class="platform-btn" href="https://mypillow.com/GRIM" target="_blank" rel="noopener noreferrer">MyPillow code GRIM</a>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <section class="vods-section">
+      <div class="section-head-row">
+        <h2 class="section-head-title">RECENT EPISODES</h2>
+        <a class="btn-pill" href="https://grimaldi.tv/Episodes">All Episodes on Grimaldi.tv</a>
+      </div>
+      <div id="vodsContainer" class="vods-grid"></div>
+    </section>
+  </main>
+
+  <footer class="footer-main">
+    <div class="footer-inner">
+      <div class="footer-top-row">
+        <div class="footer-brand-info">
+          <img src="/assets/grimaldi-logo-flag.jpg" alt="Grimaldi Flag">
+          <div>
+            <h4>THE DREW GRIMALDI PODCAST</h4>
+            <p>GRIMALDI.TV</p>
+          </div>
+        </div>
+        <div class="footer-links">
+          <a href="https://grimaldi.tv/">Grimaldi.tv</a>
+          <a href="https://ai.grimaldi.tv/">AI Sports</a>
+          <a href="https://mypillow.com/GRIM">MyPillow: GRIM</a>
+        </div>
+      </div>
+      <div class="footer-bottom-copy">
+        <span>© 2026 GRIMALDI.TV. All Rights Reserved.</span>
+        <span>Hosted on Cloudflare Stream</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/assets/app.js?v=20260825_watchers"></script>
+</body>
+</html>

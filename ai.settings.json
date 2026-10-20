@@ -1,0 +1,153 @@
+﻿{
+    "result":  {
+                   "placement":  {
+
+                                 },
+                   "compatibility_date":  "2026-08-04",
+                   "compatibility_flags":  [
+
+                                           ],
+                   "usage_model":  "standard",
+                   "tags":  [
+
+                            ],
+                   "tail_consumers":  [
+
+                                      ],
+                   "logpush":  false,
+                   "observability":  {
+                                         "enabled":  true,
+                                         "head_sampling_rate":  1,
+                                         "redact_query_string":  false,
+                                         "logs":  {
+                                                      "enabled":  true,
+                                                      "head_sampling_rate":  1,
+                                                      "persist":  true,
+                                                      "invocation_logs":  true
+                                                  },
+                                         "traces":  {
+                                                        "enabled":  false,
+                                                        "persist":  true,
+                                                        "head_sampling_rate":  1
+                                                    }
+                                     },
+                   "annotations":  {
+                                       "workers/triggered_by":  "version_upload"
+                                   },
+                   "bindings":  [
+                                    {
+                                        "name":  "AIRTABLE_API_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "BALLDONTLIE_API_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "BROWSER",
+                                        "type":  "browser",
+                                        "version":  2
+                                    },
+                                    {
+                                        "name":  "CF_ACCOUNT_ID",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "EMAIL",
+                                        "type":  "send_email"
+                                    },
+                                    {
+                                        "name":  "FOOTBALL_DATA_ORG_API_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "GEMINI_API_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "GEMINI_API_KEY_BACKUP",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "GROK_API_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "GROK_API_KEY_BACKUP",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "GROK_API_KEY_BACKUP2",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "META_API_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "META_API_KEY_BACKUP",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "ODDS_API_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "ODDS_API_KEY_BACKUP",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "RAPIDAPI_TENNIS_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "SAM_BETS",
+                                        "namespace_id":  "de1fea6598a74ff2820fcf4bb930933c",
+                                        "type":  "kv_namespace"
+                                    },
+                                    {
+                                        "name":  "SCRAPINGANT_API_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "SESSION_SECRET",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "STRIPE_SECRET_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "SUPABASE_SERVICE_ROLE_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "SUPABASE_URL",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "VAPID_PRIVATE_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "VAPID_PUBLIC_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "VAPID_SUBJECT",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "ZENROWS_API_KEY",
+                                        "type":  "secret_text"
+                                    }
+                                ]
+               },
+    "success":  true,
+    "errors":  [
+
+               ],
+    "messages":  [
+
+                 ]
+}
