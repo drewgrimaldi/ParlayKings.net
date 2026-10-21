@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-10-20 9:55 PM ET",
+    notes: `THE FACTOR WEIGHTS ARE BACK ON EVERYTHING. The NHL 8-factor composite (off since October 9) and the NBA/CBB 12-factor composite (off since October 8) are wired into the simulation again. Their weights tables were never altered while they were off — hockey: Expected Goals 25, Goals Saved Above Expected 20, High-Danger Chances 15; basketball: Adjusted Net Rating 20, Effective FG 15, Turnover 12 — and both return exactly as built, their edges applied to the sim lambdas through the same bridge fields football's 15-factor already uses. While basketball's composite is on, the legacy Four Factors multiplier is neutral, so nothing counts twice; hockey's goalie slot follows the same rule it always had. WNBA never ran the 12-factor and stays on its legacy path. Home court is applied once, in the bridge, exactly as before. Untouched: shrinkage 0.40, band calibration, the market fallback, grading. Tests: tests/composites-restored.test.js (16 wiring checks) plus the NHL and NBA factor suites (36 and 21); full suite green. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-20 9:39 PM ET",
     notes: `THE LEARNER, STATED PLAINLY. The entries below described the measuring and buried the point. Here it is in one breath: SAM learns from its own record. Every graded pick teaches a lesson — the position it stood in against the market, the quality of its inputs, and how the game was decided, read from its own result summary — and those lessons are recomputed and placed in front of the model before the next pick, where they weigh in the decision. That loop has run on every prediction since 8:32 PM tonight. It changes judgment, not machinery: the simulation's internal numbers do not rewrite themselves, and nothing in the block forces a pick. No code changed in this entry — the words now say what the system does.`
   },
@@ -10439,11 +10444,12 @@ Weighted 15-factor composite edge (${leader} ${comp.edge >= 0 ? "+" : ""}${comp.
       console.error("Football weighted composite failed:", compErr.message);
     }
   }
-  // NHL 8-FACTOR COMPOSITE RETIRED (Drew's call 2026-10-09): the weighted
-  // composite is off — NHL runs the generic scoring-rate sim again, same
-  // approach as the NBA/WNBA legacy path rollback. The 8-factor code stays
-  // in the bundle untouched.
-  if (false && key === "NHL") {
+  // NHL 8-FACTOR COMPOSITE — RESTORED 2026-10-20 at Drew's direct order
+  // ("turn back on my factor on everything — I want my weights back on
+  // everything"). It was switched off 2026-10-09 after a 23W-30L-3P run.
+  // NHL_IMPORTANCE_WEIGHTS was never altered while it was off; the
+  // composite returns exactly as built 2026-10-01, weights and all.
+  if (key === "NHL") {
     try {
       const comp = nhlWeightedCompositeEdge({
         teamA, teamB,
@@ -10465,10 +10471,37 @@ Weighted 8-factor composite edge (${leader} ${comp.edge >= 0 ? "+" : ""}${comp.e
       console.error("NHL weighted composite failed:", compErr.message);
     }
   }
-  // BASKETBALL LEGACY PATH (Drew's call 2026-10-08): NBA, CBB, and WNBA all
-  // run the legacy basketballProfileToFactor multiplicative path — the
-  // 12-factor weighted composite (2026-10-05) is retired.
-  if (key === "WNBA" || key === "NBA" || key === "CBB") {
+  // NBA/CBB 12-FACTOR COMPOSITE — RESTORED 2026-10-20 at Drew's direct
+  // order ("I want my weights back on everything"). It was switched off
+  // 2026-10-08 for the legacy path. NBA_IMPORTANCE_WEIGHTS was never
+  // altered while it was off; the composite returns exactly as built
+  // 2026-10-05, weights and all. The bridge applies its edge additively
+  // (+/- E/2 via basketballEdgePts) and calculateLambdaMultiplier keeps
+  // the legacy basketballFactor neutral while basketballCompositeOn is
+  // set, so nothing double-counts. Home court is applied once, via
+  // homeFieldPts in the bridge; the composite's own 4% home factor
+  // reads an isHome flag this path does not set, so it stays neutral —
+  // home court is never counted twice and never guessed.
+  if (key === "NBA" || key === "CBB") {
+    try {
+      const comp = nbaWeightedCompositeEdge({ teamA, teamB, statsA, statsB, ctxA: contextA, ctxB: contextB, league: key });
+      contextA.basketballEdgePts = comp.edge / 2;
+      contextB.basketballEdgePts = -comp.edge / 2;
+      contextA.basketballCompositeOn = true;
+      contextB.basketballCompositeOn = true;
+      if (comp.bits.length) {
+        const leader = comp.edge >= 0 ? teamA : teamB;
+        basketballCompositeLine = `
+Weighted 12-factor composite edge (${leader} ${comp.edge >= 0 ? "+" : ""}${comp.edge.toFixed(2)} points): ${comp.bits.join("; ")}.`;
+      }
+    } catch (compErr) {
+      console.error("NBA weighted composite failed:", compErr.message);
+    }
+  }
+  // BASKETBALL LEGACY PATH: WNBA runs the legacy
+  // basketballProfileToFactor multiplicative path — it never ran the
+  // 12-factor composite.
+  if (key === "WNBA") {
     const gpA = statsA.gamesPlayed || statsA.basketballProfile && statsA.basketballProfile.gamesPlayed;
     const gpB = statsB.gamesPlayed || statsB.basketballProfile && statsB.basketballProfile.gamesPlayed;
     const packA = basketballProfileToFactor(statsA.basketballProfile, statsB.basketballProfile, key, gpA);
