@@ -42,8 +42,8 @@ function extractFn(name) {
 }
 
 const code = ['normalizeConfPct', 'extractOddsSnapshotFromNotes', 'extractFinalScoreFromNotes',
-  'parseScoreMargin', 'privateDiagForRecord', 'marketStanceForRecord',
-  'computeLearnedPatterns'].map(extractFn).join('\n');
+  'parseScoreMargin', 'privateDiagForRecord', 'extractStoryFromNotes', 'marketStanceForRecord',
+  'tightCapForLeague', 'computeLearnedPatterns'].map(extractFn).join('\n');
 eval(code);
 
 function rec(result, notes, conf, league) {
@@ -86,6 +86,30 @@ check('block: dissents by league (NCAAF)', block.includes('Dissents in NCAAF: hi
 check('block: preseason-stats diagnostic line 40% (2-3, n=5)', block.includes('Picks with preseason stats used in the sim: hit 40% (2-3, n=5)'));
 check('block: segment under n=5 is suppressed (35-44 band)', !block.includes('35-44% implied'));
 check('block: closing instruction present, no number moved', block.includes('changes no number by itself'));
+
+// --- summary-mined segments: the learner reads the result stories ---
+function storyRec(result, scoreLine, story, league) {
+  const notes = `Prediction text. Auto-graded 2026-10-20: ${scoreLine} \u00B7 Result: ${story} Pick: Alpha (55%) \u2014 ${result}.`;
+  return { fields: { 'Result': result, 'Notes': notes, 'Confidence %': 0.55, 'League': league || 'NBA', 'Bet Label': 'Alpha vs Beta', 'Picked Winner': 'Alpha' } };
+}
+const storyRecords = [];
+for (let i = 0; i < 2; i++) storyRecords.push(storyRec('Win', 'Alpha: 120 - Beta: 112', 'Alpha rallied from 17 down in the fourth quarter and beat Beta.'));
+for (let i = 0; i < 3; i++) storyRecords.push(storyRec('Loss', 'Alpha: 120 - Beta: 112', 'Beta rallied from 17 down in the fourth quarter and beat Alpha.'));
+for (let i = 0; i < 4; i++) storyRecords.push(storyRec('Win', 'Alpha: 130 - Beta: 100', 'Alpha dismantled Beta from the opening tip and never trailed.'));
+storyRecords.push(storyRec('Loss', 'Alpha: 130 - Beta: 100', 'Beta dismantled Alpha from the opening tip and never trailed.'));
+storyRecords.push(storyRec('Win', 'Alpha: 118 - Beta: 110', 'Alpha outlasted Beta in overtime.'));
+for (let i = 0; i < 4; i++) storyRecords.push(storyRec('Loss', 'Alpha: 118 - Beta: 110', 'Beta outlasted Alpha in overtime.'));
+for (let i = 0; i < 3; i++) storyRecords.push(storyRec('Win', 'Alpha: 115 - Beta: 105', 'Gamma scored 34 for Alpha \u2014 12.5 over a season average of 21.5.'));
+for (let i = 0; i < 2; i++) storyRecords.push(storyRec('Loss', 'Alpha: 115 - Beta: 105', 'Gamma scored 34 for Beta \u2014 12.5 over a season average of 21.5.'));
+for (let i = 0; i < 2; i++) storyRecords.push(storyRec('Win', 'Alpha: 24 - Beta: 21', 'Alpha held on late to beat Beta.', 'NFL'));
+for (let i = 0; i < 3; i++) storyRecords.push(storyRec('Loss', 'Alpha: 24 - Beta: 21', 'Beta held on late to beat Alpha.', 'NFL'));
+const storyBlock = computeLearnedPatterns(storyRecords);
+check('story: comeback line 40% (2-3, n=5)', storyBlock.includes('turned on a double-digit comeback: hit 40% (2-3, n=5)'));
+check('story: rout line 80% (4-1, n=5)', storyBlock.includes('became routs (decided by 25 or more): hit 80% (4-1, n=5)'));
+check('story: past-regulation line 20% (1-4, n=5)', storyBlock.includes('went past regulation: hit 20% (1-4, n=5)'));
+check('story: star-over-average line 60% (3-2, n=5)', storyBlock.includes('beat his season average by 10 or more: hit 60% (3-2, n=5)'));
+check('story: tight-finish line 40% (2-3, n=5)', storyBlock.includes('tight finishes (inside the league\u2019s one-score margin): hit 40% (2-3, n=5)') || storyBlock.includes("tight finishes (inside the league's one-score margin): hit 40% (2-3, n=5)"));
+check('tightCap: points leagues 5, NHL/Soccer 1, MLB 2, UFC null', tightCapForLeague('NBA') === 5 && tightCapForLeague('NHL') === 1 && tightCapForLeague('MLB') === 2 && tightCapForLeague('UFC') === null);
 
 // --- empty / unclassifiable inputs ---
 check('empty input returns empty string', computeLearnedPatterns([]) === '');

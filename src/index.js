@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-10-20 8:53 PM ET",
+    notes: `THE LEARNER READS THE SUMMARIES NOW. The LEARNED PATTERNS block shipped earlier tonight measured positions and inputs; this extension mines the result summaries themselves — the recap prose of every graded game, read through the same story extractor that feeds the track record — and adds five game-script segments to the same hidden block: games the story says turned on a double-digit comeback, games that became routs (decided by 25 or more), tight finishes inside the league's own one-score margin (5 points in the points leagues, 1 goal in hockey and soccer, 2 runs in baseball), games that went past regulation, and games where a player beat his season average by 10 or more. Each is stated as the model's measured hit rate in those games, with the same sample rules (silent under 5 graded games, flagged under 12). Measured on tonight's record (the last 1,000 graded picks): routs 74% (26-9, n=35), games past regulation 58% (14-10, n=24), a player 10+ over his average 59% (13-9, n=22), tight finishes 52% (70-65, n=135). One segment is honestly silent tonight: the comeback segment is built and tested, but the current write-ups rarely state the deficit a team came back from, so fewer than 5 graded games in the window carry it and the block does not state a rate it cannot support — it will speak as the write-ups that do carry the turning point accumulate. Same boundaries as the block it extends: context the model weighs, moving no number, no gate, and no pick by itself; the simulation, the market fallback, band calibration with 0.40 shrinkage, the league-bias learner, and grading are untouched. Tests: tests/learned-patterns.test.js extended to 28 checks, including the summary segments on synthetic write-ups in the real record format; full suite green. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-20 8:32 PM ET",
     notes: `THE LEARNER: THE GRADED RECORD NOW TEACHES PATTERNS, NOT JUST NUMBERS. Until tonight the record taught the model two numeric lessons — band calibration and the league-bias learner, both reading only the outcome and the stated confidence — while the position the model stood in on each pick was computed for nobody: the private diagnostics knew how a pick stood against the market and what its inputs looked like, but nothing ever added them up. A new block in the hidden track-record context (LEARNED PATTERNS, computed by computeLearnedPatterns from the same graded records that feed the track record) does that addition on every prediction. It classifies each graded pick by its standing against the market stored on its own record — sided with the favorite, moved by the market fallback, or a dissent, split by the price faded (under 35 / 35-44 / 45-49 percent implied) and by the edge claimed over the market (10 or less / 11-20 / over 20 points), plus dissents by league — and by the data-quality diagnostics mined from the pick's own record (thin or placeholder data, preseason stats in the sim, a dummy input, an out player priced in), and states each segment's measured hit rate with its sample size. Segments under 5 graded picks are not stated; under 12 are flagged small sample. Measured on tonight's record (the last 1,000 graded picks, 478 classified against a stored market): sided with the favorite 61% (188-120), fallback moves 64% (30-17), dissents priced under 35% implied 29% (7-17), dissents claiming over 20 points of edge on the market 32% (8-17), near-even dissents 48% (23-25) — the same shape as the October 13-19 anchor measurement, now computed by the system itself and carried into every decision instead of noticed by hand. Context only, deliberately: the block moves no number, no gate, and no pick by itself — the simulation, the market fallback, band calibration with 0.40 shrinkage, the league-bias learner, and grading are untouched, and the model weighs the patterns in its judgment the same way it weighs CONFIDENCE CALIBRATION. Tests: tests/learned-patterns.test.js (22 checks, including segment math on synthetic records and wiring guards that the fallback and calibration paths are unchanged); full suite green. Model stays 1.7.2.`
   },
@@ -14677,6 +14682,16 @@ function marketStanceForRecord(r) {
   const conf = normalizeConfPct(fields["Confidence %"]);
   return { kind: "dissent", impl, gap: conf != null ? Math.round(conf - impl) : null };
 }
+function tightCapForLeague(league) {
+  // The one-score margin for the tight-finish summary segment, in each
+  // league's own scoring unit. Null = the segment does not apply.
+  switch (String(league || "")) {
+    case "NBA": case "WNBA": case "CBB": case "NCAAB": case "NFL": case "NCAAF": return 5;
+    case "NHL": case "Soccer": return 1;
+    case "MLB": return 2;
+    default: return null;
+  }
+}
 function computeLearnedPatterns(records) {
   // THE LEARNER (2026-10-20 — Drew's standing assignment since the project
   // began: a model that makes predictions and learns from them). Until now
@@ -14710,6 +14725,18 @@ function computeLearnedPatterns(records) {
     dummy_era_input: { label: "a dummy ERA input in the sim", wins: 0, losses: 0 },
     out_qb_in_inputs: { label: "a QB listed OUT priced into the inputs", wins: 0, losses: 0 }
   };
+  // Segments mined from the result SUMMARIES themselves — the recap prose
+  // of each graded game (extractStoryFromNotes) plus its final margin.
+  // This is the layer that reads the data: how the game was actually
+  // decided (a comeback, a rout, a tight finish, extra time, a star
+  // blowing past his season average) set against how the pick fared.
+  const storySegs = {
+    comeback: { label: "Picks in games the result story says turned on a double-digit comeback", wins: 0, losses: 0 },
+    rout: { label: "Picks in games that became routs (decided by 25 or more)", wins: 0, losses: 0 },
+    tight: { label: "Picks in tight finishes (inside the league's one-score margin)", wins: 0, losses: 0 },
+    overtime: { label: "Picks in games that went past regulation", wins: 0, losses: 0 },
+    star: { label: "Picks in games where a player beat his season average by 10 or more", wins: 0, losses: 0 }
+  };
   let classified = 0;
   for (const r of records || []) {
     const fields = (r && r.fields) || {};
@@ -14735,6 +14762,20 @@ function computeLearnedPatterns(records) {
       for (const key of Object.keys(diagSegs)) {
         if (priv.includes(key)) bump(diagSegs[key]);
       }
+    }
+    const story = extractStoryFromNotes(fields["Notes"]);
+    if (story) {
+      const sLow = story.toLowerCase();
+      const score = extractFinalScoreFromNotes(fields["Notes"]);
+      const margin = score ? parseScoreMargin(score) : null;
+      const deficitM = sLow.match(/(\d{1,2})\s+down\b/) || sLow.match(/(?:down|trailed by|deficit of)\s+(\d{1,2})/) || sLow.match(/(\d{1,2})-point deficit/);
+      if (/(came back|come back|comeback|rallied|rally|stormed back|erased|roared back|fought back)/.test(sLow) && ((deficitM && Number(deficitM[1]) >= 10) || sLow.includes("double-digit") || sLow.includes("double digit"))) bump(storySegs.comeback);
+      if ((margin != null && margin >= 25) || /(rout|blowout|blew out|blown out|dismantled|thrashed)/.test(sLow)) bump(storySegs.rout);
+      const tightCap = tightCapForLeague(fields["League"]);
+      if (margin != null && tightCap != null && margin <= tightCap) bump(storySegs.tight);
+      if (/overtime|extra time|shootout/.test(sLow) || /\bOT\b/.test(story)) bump(storySegs.overtime);
+      const starM = sLow.match(/(\d+(?:\.\d+)?)\s+over a season average/);
+      if (starM && Number(starM[1]) >= 10) bump(storySegs.star);
     }
   }
   const line = (label, s) => {
@@ -14763,6 +14804,10 @@ function computeLearnedPatterns(records) {
   }
   for (const d of Object.values(diagSegs)) {
     const l = line(`Picks with ${d.label}`, d);
+    if (l) lines.push(l);
+  }
+  for (const d of Object.values(storySegs)) {
+    const l = line(d.label, d);
     if (l) lines.push(l);
   }
   if (!lines.length) return "";
