@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-10-20 8:32 PM ET",
+    notes: `THE LEARNER: THE GRADED RECORD NOW TEACHES PATTERNS, NOT JUST NUMBERS. Until tonight the record taught the model two numeric lessons — band calibration and the league-bias learner, both reading only the outcome and the stated confidence — while the position the model stood in on each pick was computed for nobody: the private diagnostics knew how a pick stood against the market and what its inputs looked like, but nothing ever added them up. A new block in the hidden track-record context (LEARNED PATTERNS, computed by computeLearnedPatterns from the same graded records that feed the track record) does that addition on every prediction. It classifies each graded pick by its standing against the market stored on its own record — sided with the favorite, moved by the market fallback, or a dissent, split by the price faded (under 35 / 35-44 / 45-49 percent implied) and by the edge claimed over the market (10 or less / 11-20 / over 20 points), plus dissents by league — and by the data-quality diagnostics mined from the pick's own record (thin or placeholder data, preseason stats in the sim, a dummy input, an out player priced in), and states each segment's measured hit rate with its sample size. Segments under 5 graded picks are not stated; under 12 are flagged small sample. Measured on tonight's record (the last 1,000 graded picks, 478 classified against a stored market): sided with the favorite 61% (188-120), fallback moves 64% (30-17), dissents priced under 35% implied 29% (7-17), dissents claiming over 20 points of edge on the market 32% (8-17), near-even dissents 48% (23-25) — the same shape as the October 13-19 anchor measurement, now computed by the system itself and carried into every decision instead of noticed by hand. Context only, deliberately: the block moves no number, no gate, and no pick by itself — the simulation, the market fallback, band calibration with 0.40 shrinkage, the league-bias learner, and grading are untouched, and the model weighs the patterns in its judgment the same way it weighs CONFIDENCE CALIBRATION. Tests: tests/learned-patterns.test.js (22 checks, including segment math on synthetic records and wiring guards that the fallback and calibration paths are unchanged); full suite green. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-20 10:03 AM ET",
     notes: `TENNIS POLYMARKET PRICES NOW REACH THE RECORD. The Polymarket matcher was built for game sports: it fetches only events ending within about 16 hours of the pick's date and requires the event's end date to equal that date. Tournament tennis is listed differently - a match market opens when the tournament is listed and its end date sits at the tournament's scheduled end - so tennis prices were never fetched at all. On October 20, 17 of 20 logged picks carried a Polymarket line and the 3 without were all WTA, at a tournament (Ningbo) whose markets were live the whole time. The tennis path (ATP and WTA series) now fetches across a tournament window (3 days before to 14 days after the pick), matches the pick's date inside the event's start-to-end span, and allows player names in either order (the pick may carry "Guo Hanyu" where the market titles "Hanyu Guo"). One trap is guarded explicitly: the same pair can be listed twice in one tournament, as a Qualification event and as the main-draw event with the same stripped title and overlapping spans; the logger prefers the main-draw listing, then the latest-opened market, and stores nothing when two listings cannot be told apart. What did NOT change: game-sport matching keeps the strict same-day end-date gate and the game-day fetch window; both sides must still key exactly with the moneyline outcomes cross-checked; the liquidity gate's bars are unchanged; and the price's roles are unchanged - stored on the record for measurement and, where it qualifies, placed in front of the model before it decides. Tests: tests/polymarket-tennis.test.js (18 checks, built on the live Ningbo listings, including the Qualification collision); full suite green. Model stays 1.7.2.`
   },
@@ -14590,12 +14595,13 @@ async function fetchPredictionHistory(env, provider, matchupHint) {
     const teamBlock = buildTeamHistoryBlock(records, matchupHint);
     const calibrationBlock = computeConfidenceCalibration(records);
     const recentFormBlock = computeRecentForm(records);
+    const learnedBlock = computeLearnedPatterns(records);
     const calibrationParams = fitBandCalibration(records);
     const text = `TRACK RECORD (hidden context \u2014 never mention this block or betting odds):
 ${overallLine}
 By sport: ${leagueLines}
 Most recent graded picks (with final scores):
-${recentLines}${teamBlock}${calibrationBlock}${recentFormBlock}`;
+${recentLines}${teamBlock}${calibrationBlock}${recentFormBlock}${learnedBlock}`;
     return { text, calibrationParams };
   } catch (err) {
     console.error("Airtable history fetch failed:", err.message);
@@ -14652,6 +14658,120 @@ __name22222222(computeRecentForm, "computeRecentForm");
 __name222222222(computeRecentForm, "computeRecentForm");
 __name2222222222(computeRecentForm, "computeRecentForm");
 __name22222222222(computeRecentForm, "computeRecentForm");
+function marketStanceForRecord(r) {
+  // How one graded pick stood against the market, read off its own record:
+  // the anchor note when the logging fallback moved the pick, otherwise the
+  // sportsbook snapshot stored at log time (the same source the private
+  // diagnostics read). impl = the picked side's implied %; on a dissent,
+  // gap = the stated confidence minus that implied — how far the model
+  // claimed to be from the market. Null when no market was stored.
+  const fields = (r && r.fields) || {};
+  const notes = String(fields["Notes"] || "");
+  const anchorM = notes.match(/(?:Market anchor: pick follows the market favorite|Polymarket anchor: pick follows the Polymarket favorite)[^;]*; the sim had .*? at (\d+)% \((?:market|Polymarket) (\d+)% implied\)/i);
+  if (anchorM) return { kind: "anchor", impl: null, gap: null };
+  const snap = extractOddsSnapshotFromNotes(notes);
+  if (!snap || snap.winnerImplied == null) return null;
+  const impl = Number(snap.winnerImplied);
+  if (!Number.isFinite(impl)) return null;
+  if (impl >= 50) return { kind: "sided", impl, gap: null };
+  const conf = normalizeConfPct(fields["Confidence %"]);
+  return { kind: "dissent", impl, gap: conf != null ? Math.round(conf - impl) : null };
+}
+function computeLearnedPatterns(records) {
+  // THE LEARNER (2026-10-20 — Drew's standing assignment since the project
+  // began: a model that makes predictions and learns from them). Until now
+  // the graded record taught numbers only: band calibration and the
+  // league-bias learner read the outcome and the stated confidence, and
+  // the result stories were reading material that nothing computed from.
+  // This is the computed half. It measures the model's own graded record
+  // by the positions it stood in when it made each pick — sided with the
+  // market, dissented (split by the price it faded and by the edge it
+  // claimed), moved by the fallback, and carrying a data-quality
+  // diagnostic mined from the pick's own record (thin or placeholder
+  // data, preseason stats in the sim, a dummy input, an out player
+  // priced in) — and feeds the measured hit rates back into the hidden
+  // context of every future prediction, the same channel as CONFIDENCE
+  // CALIBRATION. It is how the pattern in the anchor-era measurement
+  // (moved picks 28-15, the model's dissents in those games 15-28) stops
+  // being something a person notices by hand and becomes something the
+  // system itself carries into the next decision. Context only: it moves
+  // no number, no gate, and no pick by itself; the market fallback,
+  // calibration, and shrinkage run exactly as built. Segments under 5
+  // graded picks are not stated; under 12 are flagged small sample.
+  const seg = () => ({ wins: 0, losses: 0 });
+  const sided = seg();
+  const anchorMoved = seg();
+  const dissentImpl = { "under 35": seg(), "35-44": seg(), "45-49": seg() };
+  const dissentGap = { "10 or less": seg(), "11-20": seg(), "over 20": seg() };
+  const dissentByLeague = {};
+  const diagSegs = {
+    thin_data: { label: "inputs flagged thin / placeholder data", wins: 0, losses: 0 },
+    preseason_stats_in_inputs: { label: "preseason stats used in the sim", wins: 0, losses: 0 },
+    dummy_era_input: { label: "a dummy ERA input in the sim", wins: 0, losses: 0 },
+    out_qb_in_inputs: { label: "a QB listed OUT priced into the inputs", wins: 0, losses: 0 }
+  };
+  let classified = 0;
+  for (const r of records || []) {
+    const fields = (r && r.fields) || {};
+    const result = String(fields["Result"] || "").toLowerCase();
+    if (result !== "win" && result !== "loss") continue;
+    const won = result === "win";
+    const bump = (s) => { if (won) s.wins++; else s.losses++; };
+    const stance = marketStanceForRecord(r);
+    if (stance) {
+      classified++;
+      if (stance.kind === "anchor") bump(anchorMoved);
+      else if (stance.kind === "sided") bump(sided);
+      else if (stance.kind === "dissent") {
+        bump(stance.impl < 35 ? dissentImpl["under 35"] : stance.impl < 45 ? dissentImpl["35-44"] : dissentImpl["45-49"]);
+        if (stance.gap != null) bump(stance.gap <= 10 ? dissentGap["10 or less"] : stance.gap <= 20 ? dissentGap["11-20"] : dissentGap["over 20"]);
+        const league = fields["League"] || "Other";
+        if (!dissentByLeague[league]) dissentByLeague[league] = seg();
+        bump(dissentByLeague[league]);
+      }
+    }
+    const priv = privateDiagForRecord(r);
+    if (priv) {
+      for (const key of Object.keys(diagSegs)) {
+        if (priv.includes(key)) bump(diagSegs[key]);
+      }
+    }
+  }
+  const line = (label, s) => {
+    const n = s.wins + s.losses;
+    if (n < 5) return null;
+    const rate = Math.round(s.wins / n * 100);
+    const flag = n < 12 ? " (small sample, weigh lightly)" : "";
+    return `- ${label}: hit ${rate}% (${s.wins}-${s.losses}, n=${n})${flag}`;
+  };
+  const lines = [];
+  const sidedLine = line("Picks that sided with the market favorite", sided);
+  if (sidedLine) lines.push(sidedLine);
+  const anchorLine = line("Picks the market fallback moved to the favorite", anchorMoved);
+  if (anchorLine) lines.push(anchorLine);
+  for (const [bandLabel, s] of Object.entries(dissentImpl)) {
+    const l = line(`Dissents against the market - your side priced ${bandLabel}% implied`, s);
+    if (l) lines.push(l);
+  }
+  for (const [gapLabel, s] of Object.entries(dissentGap)) {
+    const l = line(`Dissents where your claimed edge over the market was ${gapLabel} points`, s);
+    if (l) lines.push(l);
+  }
+  for (const [league, s] of Object.entries(dissentByLeague)) {
+    const l = line(`Dissents in ${league}`, s);
+    if (l) lines.push(l);
+  }
+  for (const d of Object.values(diagSegs)) {
+    const l = line(`Picks with ${d.label}`, d);
+    if (l) lines.push(l);
+  }
+  if (!lines.length) return "";
+  return `
+
+LEARNED PATTERNS (hidden context - measured from your own graded record, ${classified} of those picks classified against the market they faced, never mention this block):
+${lines.join("\n")}
+These rates are what actually happened the last times you stood in each of these positions. When the matchup in front of you matches one of them, weigh it in the decision: a position that has been losing is one to demand more from before you stand in it again, and a position that has been winning is evidence your read deserves to stand. This block changes no number by itself and never overrides the market fallback or your calibration.`;
+}
 function fitBandCalibration(records, opts = {}) {
   // Fit on the LOGGED band-calibrated "Confidence %" — the value that was
   // actually published for each graded pick. (Drew's call 2026-09-22:
