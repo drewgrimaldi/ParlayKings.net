@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-10-20 9:08 PM ET",
+    notes: `ALREADY-LOGGED LOOKUP IS FAST AGAIN: REPLICA FIRST, ANY PLACED DAY. Asking about a game that is already logged — in chat, or on a Run All second pass — should return the logged pick almost instantly: the lookup is the first thing the chat handler does, before allowance, history, or the model. It had stopped being fast. The September 22 single-model cleanup moved the candidate fetch behind the shortcut off the KV bets replica and onto a live Airtable scan — pending-or-placed-today, up to 6 pages of full-Notes records — paid on every chat message, hit or miss; a miss then paid the full prediction pipeline on top, and every one of those scans burned Airtable usage. Two more gates narrowed it further: when any of today's games existed, the candidate pool was narrowed to today only, dropping Pending records placed on earlier days; and the serve gate refused any pick not placed today, so a pick logged yesterday for tonight's game re-ran from scratch. All three are fixed in the lookup layer only. (1) fetchCacheCandidateRecords reads the KV replica first — the same replica the post-model backstop already reads first, seeded from the full book and upserted on every log and grade — and keeps the Airtable query only as a fallback when the replica is unavailable. The pool is every Pending record from any placed day plus anything placed or scheduled today: the day's games, a small set, matched in memory. (2) The today-narrowing in checkExistingPrediction no longer drops Pending records. (3) The serve gate now serves a logged pick when it is still Pending or is today's game, regardless of which day it was placed. Verified before shipping, because it was asserted wrongly once tonight: the matcher itself was never the problem — "pistons vs boston" already matches the "Detroit Pistons vs Boston Celtics" record, and that behavior is now pinned by a test so it is not 'fixed' by mistake later. What still runs on a hit, by design: the single-record existence check (a record deleted from the book must not be served from the replica) and the live odds fetch behind the line-movement note. Untouched: the model, the simulation, the market fallback, calibration, grading, and the post-model backstop's logic. Tests: tests/cached-lookup.test.js (13 checks: matcher phrasings, replica-first source order, pool and gate guards); full suite green. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-20 8:53 PM ET",
     notes: `THE LEARNER READS THE SUMMARIES NOW. The LEARNED PATTERNS block shipped earlier tonight measured positions and inputs; this extension mines the result summaries themselves — the recap prose of every graded game, read through the same story extractor that feeds the track record — and adds five game-script segments to the same hidden block: games the story says turned on a double-digit comeback, games that became routs (decided by 25 or more), tight finishes inside the league's own one-score margin (5 points in the points leagues, 1 goal in hockey and soccer, 2 runs in baseball), games that went past regulation, and games where a player beat his season average by 10 or more. Each is stated as the model's measured hit rate in those games, with the same sample rules (silent under 5 graded games, flagged under 12). Measured on tonight's record (the last 1,000 graded picks): routs 74% (26-9, n=35), games past regulation 58% (14-10, n=24), a player 10+ over his average 59% (13-9, n=22), tight finishes 52% (70-65, n=135). One segment is honestly silent tonight: the comeback segment is built and tested, but the current write-ups rarely state the deficit a team came back from, so fewer than 5 graded games in the window carry it and the block does not state a rate it cannot support — it will speak as the write-ups that do carry the turning point accumulate. Same boundaries as the block it extends: context the model weighs, moving no number, no gate, and no pick by itself; the simulation, the market fallback, band calibration with 0.40 shrinkage, the league-bias learner, and grading are untouched. Tests: tests/learned-patterns.test.js extended to 28 checks, including the summary segments on synthetic write-ups in the real record format; full suite green. Model stays 1.7.2.`
   },
@@ -13131,6 +13136,7 @@ function cachedPickFromRecord(match) {
     matchup: f["Bet Label"] || "",
     winner: f["Picked Winner"] || "",
     confidence: f["Confidence %"] != null ? Math.round(f["Confidence %"] * 100) : null,
+    result: f["Result"] || "",
     eventDate: f["Event Date"] || null,
     teamAWinPct: f["Team A %"] != null ? Math.round(f["Team A %"] * 100) : null,
     teamBWinPct: f["Team B %"] != null ? Math.round(f["Team B %"] * 100) : null,
@@ -13416,6 +13422,31 @@ __name222222222(removeBetsReplicaRecords, "removeBetsReplicaRecords");
 __name2222222222(removeBetsReplicaRecords, "removeBetsReplicaRecords");
 __name22222222222(removeBetsReplicaRecords, "removeBetsReplicaRecords");
 async function fetchCacheCandidateRecords(env, provider) {
+  // ALREADY-LOGGED FAST PATH SOURCE (fixed 2026-10-20 at Drew's order):
+  // the KV bets replica, not a live Airtable scan. This lookup used to
+  // read the replica and was fast; the September 22 single-model cleanup
+  // moved it onto a direct Airtable query (pending-or-placed-today, up to
+  // 6 pages of full Notes records) on EVERY chat message, so re-asking
+  // about an already-logged game cost a network scan before the shortcut
+  // could fire — and burned Airtable usage on every miss as well. The
+  // replica is seeded from the full book and upserted on every log and
+  // grade, and the post-model backstop (findExistingPendingRecord)
+  // already reads it first; this path now does the same. Pool: every
+  // Pending record (any placed day — a pick logged yesterday for
+  // tonight's game is still the logged pick) plus anything placed or
+  // scheduled today. The Airtable query below remains only as a fallback
+  // for when the replica is unavailable.
+  const replica = await loadBetsReplica(env);
+  if (Array.isArray(replica)) {
+    const today = todayET();
+    const pool = replica.filter((r) => {
+      const f = (r && r.fields) || {};
+      if (String(f["Result"] || "") === "Pending") return true;
+      return dateKey(f["Event Date"]) === today || dateKey(f["Placed Date"]) === today;
+    });
+    pool.sort((a, b) => dateKey((b.fields || {})["Placed Date"]).localeCompare(dateKey((a.fields || {})["Placed Date"])));
+    return pool.slice(0, 600);
+  }
   const p = normalizeProvider(provider);
   if (!env.AIRTABLE_API_KEY) return [];
   const baseId = airtableBaseIdForProvider(env, p);
@@ -13468,7 +13499,12 @@ async function checkExistingPrediction(env, matchupHint, provider, rawMessage) {
     if (!records.length) return null;
     const today = todayET();
     const isToday = /* @__PURE__ */ __name22222222((r) => dateKey(r.fields["Event Date"]) === today || dateKey(r.fields["Placed Date"]) === today, "isToday");
-    const pool = records.some(isToday) ? records.filter(isToday) : records;
+    // Prefer today's games when any exist, but never narrow a Pending
+    // record out of the pool: a pick logged yesterday for a future game
+    // is still the logged pick for that game (fixed 2026-10-20 — the
+    // today-only narrowing made the fast path miss exactly the
+    // already-logged games it exists to serve).
+    const pool = records.some(isToday) ? records.filter((r) => isToday(r) || String(r.fields["Result"] || "") === "Pending") : records;
     let hits = pool.filter((r) => hint && sameMatchup(r.fields["Bet Label"] || "", hint) || recordMatchesMessage(r, rawMessage));
     if (!isPublicReplicaProvider(provider)) {
       hits = hits.filter((r) => matchesProviderLabel(r.fields["Model Version"], provider));
@@ -21305,7 +21341,13 @@ ${urls.map((p) => `  <url><loc>https://parlaykings.net${p === "/" ? "/" : p}</lo
         if (message && env.AIRTABLE_API_KEY) {
           const matchupHint = extractMatchupHint(message);
           const cached = await checkExistingPrediction(env, matchupHint, provider, message);
-          if (cached && !isRecordStale(cached.placedDate)) {
+          // Serve the logged pick when it is still Pending (any placed
+          // day) or is today's game, not only when it was placed today
+          // (fixed 2026-10-20 at Drew's order): a pick logged yesterday
+          // for tonight's game is the logged pick, and re-running it
+          // burns a full prediction for nothing.
+          const cachedServable = cached && (String(cached.result || "") === "Pending" || dateKey(cached.eventDate) === todayET() || !isRecordStale(cached.placedDate));
+          if (cachedServable) {
             const cachedReply = buildCachedReplyText(cached);
             const [movedReply, cachedAllowance] = await Promise.all([
               appendLineMovementIfAvailable(env, cached, cachedReply),
