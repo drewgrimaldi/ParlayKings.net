@@ -87,7 +87,7 @@ const now = Date.now();
   eq(deleted.indexOf('bgjob:fresh-done') >= 0, false, 'fresh done job kept');
 
   // 5. The enqueue path runs the job object directly, never a re-list.
-  eq(src.indexOf('ctx.waitUntil(runBgJob(env, ctx, jobKv, job)') >= 0, true, 'enqueue starts this job immediately');
+  eq(src.indexOf('ctx.waitUntil(runBgJob(env, ctx, jobKv, job, { immediate: true })') >= 0, true, 'enqueue starts this job immediately');
 
   console.log(pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -128,7 +128,7 @@ function eq(actual, expected, label) {
   chatStubMode = 'ok';
   const benv = { SAM_BETS: kv, VAPID_PRIVATE_KEY: tenv.VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY: tenv.VAPID_PUBLIC_KEY, VAPID_SUBJECT: tenv.VAPID_SUBJECT };
   const ctx = { waitUntil() {} };
-  const job = { id: 'job-1', owner: 'drew', message: 'A vs B', provider: 'meta', history: [], convoId: 'c1', cookie: 'sess=abc', push: testSub, status: 'pending', createdAt: Date.now() };
+  const job = { id: 'job-1', owner: 'drew', message: 'A vs B', provider: 'meta', history: [], convoId: 'c1', cookie: 'sess=abc', push: testSub, status: 'pending', createdAt: Date.now() - 2 * 60 * 1000 };
   await kv.put('bgjob:job-1', JSON.stringify(job));
   stubPush(201);
   await processBgJobs(benv, ctx);
@@ -147,13 +147,36 @@ function eq(actual, expected, label) {
   chatStubMode = 'fail';
   const kv2 = fakeKV();
   const benv2 = { SAM_BETS: kv2, VAPID_PRIVATE_KEY: tenv.VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY: tenv.VAPID_PUBLIC_KEY, VAPID_SUBJECT: tenv.VAPID_SUBJECT };
-  await kv2.put('bgjob:job-2', JSON.stringify({ id: 'job-2', owner: 'drew', message: 'X vs Y', provider: 'meta', history: [], convoId: 'c2', cookie: 'sess=abc', push: testSub, status: 'pending', createdAt: Date.now() }));
+  await kv2.put('bgjob:job-2', JSON.stringify({ id: 'job-2', owner: 'drew', message: 'X vs Y', provider: 'meta', history: [], convoId: 'c2', cookie: 'sess=abc', push: testSub, status: 'pending', createdAt: Date.now() - 2 * 60 * 1000 }));
   stubPush(201);
   await processBgJobs(benv2, ctx);
   restoreFetch();
   const failed = JSON.parse(await kv2.get('bgjob:job-2'));
   eq(failed.status, 'failed', 'bad pipeline marks failed');
   eq(pushCalls.length, 1, 'push sent on failure too');
+
+  // Single-runner claim: a FRESH pending job belongs to the enqueue
+  // runner — the sweeper leaves it alone entirely (no replay, no push).
+  chatStubMode = 'ok';
+  const kv4 = fakeKV();
+  const benv4 = { SAM_BETS: kv4, VAPID_PRIVATE_KEY: tenv.VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY: tenv.VAPID_PUBLIC_KEY, VAPID_SUBJECT: tenv.VAPID_SUBJECT };
+  await kv4.put('bgjob:fresh', JSON.stringify({ id: 'fresh', owner: 'drew', message: 'F vs G', provider: 'meta', history: [], convoId: 'c4', cookie: 'sess=abc', push: testSub, status: 'pending', createdAt: Date.now() }));
+  chatCalls.length = 0;
+  stubPush(201);
+  await processBgJobs(benv4, ctx);
+  restoreFetch();
+  const fresh = JSON.parse(await kv4.get('bgjob:fresh'));
+  eq(fresh.status, 'pending', 'fresh pending job left to the enqueue runner');
+  eq(chatCalls.length, 0, 'sweeper does not replay a fresh job');
+  eq(pushCalls.length, 0, 'no push for a job the sweeper skipped');
+
+  // A second runner on a finished job is a no-op: no replay, no push.
+  chatCalls.length = 0;
+  stubPush(201);
+  await runBgJob(benv, ctx, kv, JSON.parse(await kv.get('bgjob:job-1')));
+  restoreFetch();
+  eq(chatCalls.length, 0, 'finished job never runs twice');
+  eq(pushCalls.length, 0, 'no second push');
 
   // Retention: finished jobs past TTL are cleaned up.
   const kv3 = fakeKV();
@@ -181,7 +204,7 @@ function eq(actual, expected, label) {
   const postStart = src.indexOf('url.pathname === "/api/jobs"');
   const postEnd = src.indexOf('if (url.pathname', postStart + 10);
   const postBlock = src.slice(postStart, postEnd);
-  eq(postBlock.includes('ctx.waitUntil(runBgJob(env, ctx, jobKv, job)'), true, 'enqueue kicks processing immediately');
+  eq(postBlock.includes('ctx.waitUntil(runBgJob(env, ctx, jobKv, job, { immediate: true })'), true, 'enqueue kicks processing immediately');
   eq(src.includes('setInterval(pollBgJobs, 4000)'), true, 'done-poll is 4s');
 
   console.log(pass + ' passed, ' + fail + ' failed');

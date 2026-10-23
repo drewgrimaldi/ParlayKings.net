@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-10-22 9:09 PM ET",
+    notes: `BACKGROUND PREDICTIONS: ONE RUN, AND THE TAP LANDS ON THE ANSWER. A prediction sent in notify mode could run twice — the send started it immediately and the 5-minute sweeper could pick the same job up again — so one message produced two runs and two notifications. A job is now claimed by a single runner before it works, and only that runner writes the result and sends the push. Separately, tapping the ready notification could open the app to a blank chat when the finished answer had been marked rendered while the app sat in the background; the tap now opens the saved chat first, and renders the answer from the job itself if the chat will not open. The prediction pipeline is untouched. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-20 9:55 PM ET",
     notes: `THE FACTOR WEIGHTS ARE BACK ON EVERYTHING. The NHL 8-factor composite (off since October 9) and the NBA/CBB 12-factor composite (off since October 8) are wired into the simulation again. Their weights tables were never altered while they were off — hockey: Expected Goals 25, Goals Saved Above Expected 20, High-Danger Chances 15; basketball: Adjusted Net Rating 20, Effective FG 15, Turnover 12 — and both return exactly as built, their edges applied to the sim lambdas through the same bridge fields football's 15-factor already uses. While basketball's composite is on, the legacy Four Factors multiplier is neutral, so nothing counts twice; hockey's goalie slot follows the same rule it always had. WNBA never ran the 12-factor and stays on its legacy path. Home court is applied once, in the bridge, exactly as before. Untouched: shrinkage 0.40, band calibration, the market fallback, grading. Tests: tests/composites-restored.test.js (16 wiring checks) plus the NHL and NBA factor suites (36 and 21); full suite green. Model stays 1.7.2.`
   },
@@ -19506,7 +19511,7 @@ async function processBgJobs(env, ctx) {
       }
       continue;
     }
-    if (job.status === "pending" || job.status === "running" && now - (job.startedAt || 0) > 6 * 60 * 1e3) {
+    if (job.status === "pending" || (job.status === "running" && now - (job.startedAt || 0) > 6 * 60 * 1e3)) {
       cands.push(job);
     }
   }
@@ -19520,11 +19525,44 @@ async function processBgJobs(env, ctx) {
   }
 }
 __name(processBgJobs, "processBgJobs");
-async function runBgJob(env, ctx, kv, job) {
-  job.status = "running";
-  job.startedAt = Date.now();
+async function runBgJob(env, ctx, kv, job, opts) {
+  // Single-runner claim (2026-10-22): a background job used to be executed
+  // by BOTH the enqueue-time runner and the 5-minute sweeper — the sweeper
+  // read a stale "pending" copy, or rescued a job still legitimately
+  // running — so one message ran twice: two model calls, two pushes. Now a
+  // runner must claim the job in KV under its own token before it works,
+  // and only the token holder writes the result, saves the chat, and pushes.
+  const token = crypto.randomUUID();
+  let stored = null;
+  try {
+    const raw = await kv.get(bgJobKey(job.id));
+    stored = raw ? JSON.parse(raw) : null;
+  } catch (err) {
+  }
+  const nowMs = Date.now();
+  let eligible = false;
+  if (stored && stored.status === "pending") {
+    // The enqueue runner owns a fresh job. The sweeper may take a pending
+    // job only once it is 90s old — the enqueue runner claims in well
+    // under a second, so an old pending job means that runner died.
+    eligible = !!(opts && opts.immediate) || nowMs - (stored.createdAt || 0) > 90 * 1e3;
+  } else if (stored && stored.status === "running") {
+    // Rescue only a run that has been silent past the stale line.
+    eligible = nowMs - (stored.startedAt || 0) > 6 * 60 * 1e3;
+  } else if (!stored && opts && opts.immediate) {
+    // The enqueue runner reads its own write back before KV has settled.
+    eligible = true;
+  }
+  if (!eligible) return;
+  job = Object.assign({}, stored || job, { status: "running", startedAt: nowMs, runToken: token });
   try {
     await kv.put(bgJobKey(job.id), JSON.stringify(job), { expirationTtl: BGJOB_TTL });
+  } catch (err) {
+  }
+  try {
+    const raw2 = await kv.get(bgJobKey(job.id));
+    const check = raw2 ? JSON.parse(raw2) : null;
+    if (check && check.runToken && check.runToken !== token) return;
   } catch (err) {
   }
   let data = null;
@@ -19543,6 +19581,15 @@ async function runBgJob(env, ctx, kv, job) {
     ok = !!(res.ok && data && (data.reply || data.paywall));
   } catch (err) {
     data = { error: err.message };
+  }
+  // Only the claim holder finishes the job. If another runner claimed it
+  // while this one worked (a stale rescue), this run's result goes
+  // nowhere: no state write, no chat save, no push.
+  try {
+    const rawF = await kv.get(bgJobKey(job.id));
+    const fin = rawF ? JSON.parse(rawF) : null;
+    if (fin && fin.runToken && fin.runToken !== token) return;
+  } catch (err) {
   }
   job.doneAt = Date.now();
   if (ok) {
@@ -19808,7 +19855,7 @@ var ai_worker_current_default = {
         return new Response(JSON.stringify({ error: "Could not start the background run." }), { status: 500, headers: { "Content-Type": "application/json" } });
       }
       try {
-        ctx.waitUntil(runBgJob(env, ctx, jobKv, job).catch((werr) => console.error("bgjob enqueue-run failed " + job.id + ": " + (werr && werr.message))));
+        ctx.waitUntil(runBgJob(env, ctx, jobKv, job, { immediate: true }).catch((werr) => console.error("bgjob enqueue-run failed " + job.id + ": " + (werr && werr.message))));
       } catch (err) {
       }
       return new Response(JSON.stringify({ jobId: job.id, status: "pending" }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
@@ -23461,17 +23508,30 @@ ${sportsbookDrawerHtml()}
       if (j.status === "done" || j.status === "failed") {
         seenBgJobs[j.id] = 1;
         try { localStorage.setItem("pk_seen_" + j.id, "1"); } catch (e) {}
-        var _rStartedLs = null; try { _rStartedLs = localStorage.getItem("pk_started_" + j.id); } catch (e) {}
-        if (startedBgJobs[j.id] || _rStartedLs) return;
-        startedBgJobs[j.id] = 1;
-        try { localStorage.setItem("pk_started_" + j.id, "1"); } catch (e) {}
         (async function() {
+          // The finished turn is saved server-side before the push goes
+          // out, so opening the saved chat is the reliable landing — try
+          // it first, whatever the started flags say. The old order
+          // checked the started flag first and returned silently when a
+          // background render had set it, so a notification tap opened
+          // the app to nothing (2026-10-22).
           let opened = false;
           if (j.convoId) { try { opened = await openConvo(j.convoId); } catch (e) { opened = false; } }
-          if (!opened) {
-            try { addMsg("user", j.message); } catch (e) {}
-            try { await renderBgJob(j); } catch (e) {}
+          if (opened) {
+            startedBgJobs[j.id] = 1;
+            try { localStorage.setItem("pk_started_" + j.id, "1"); } catch (e) {}
+            renderedBgJobs[j.id] = 1;
+            return;
           }
+          var _rStartedLs = null; try { _rStartedLs = localStorage.getItem("pk_started_" + j.id); } catch (e) {}
+          if (!(startedBgJobs[j.id] || _rStartedLs)) {
+            startedBgJobs[j.id] = 1;
+            try { localStorage.setItem("pk_started_" + j.id, "1"); } catch (e) {}
+          }
+          // Started-flagged or not, the tap must land on the answer:
+          // render it from the job itself when the saved chat won't open.
+          try { addMsg("user", j.message); } catch (e) {}
+          try { await renderBgJob(j); } catch (e) {}
           renderedBgJobs[j.id] = 1;
         })();
       } else {
