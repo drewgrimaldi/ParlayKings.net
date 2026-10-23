@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-10-23 11:44 AM ET",
+    notes: `THE REPLICA CARRIES THE WHOLE BOOK AGAIN. The copy of the record that feeds the stats and the sheet was capped at 3,000 picks — past that, the oldest graded picks silently fell out, and season totals shrank instead of growing. One failed read could also replace the whole copy with an empty one; that is what blanked the sheet on October 23. The copy now paginates through the entire table, and a failed read leaves the last good copy in place. The sheet sync also refuses any fetch that comes back with less than half the book. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-22 9:09 PM ET",
     notes: `BACKGROUND PREDICTIONS: ONE RUN, AND THE TAP LANDS ON THE ANSWER. A prediction sent in notify mode could run twice — the send started it immediately and the 5-minute sweeper could pick the same job up again — so one message produced two runs and two notifications. A job is now claimed by a single runner before it works, and only that runner writes the result and sends the push. Separately, tapping the ready notification could open the app to a blank chat when the finished answer had been marked rendered while the app sat in the background; the tap now opens the saved chat first, and renders the answer from the job itself if the chat will not open. The prediction pipeline is untouched. Model stays 1.7.2.`
   },
@@ -13332,7 +13337,12 @@ async function seedBetsReplicaFromAirtable(env) {
   const records = [];
   let offset = "";
   try {
-    for (let page = 0; page < 30; page++) {
+    // Paginate to the end of the table. The old 30-page stop capped the
+    // replica at 3,000 records, newest first — once the book passed 3,000
+    // the oldest graded picks silently fell out of the replica, the sheet,
+    // and every count built on them (fixed 2026-10-23). The 500-page bound
+    // is only a runaway-loop guard (50,000 records).
+    for (let page = 0; page < 500; page++) {
       const params = new URLSearchParams({
         pageSize: "100",
         "sort[0][field]": "Placed Date",
@@ -13344,8 +13354,10 @@ async function seedBetsReplicaFromAirtable(env) {
         headers: { Authorization: `Bearer ${env.AIRTABLE_API_KEY}` }
       });
       if (!res.ok) {
+        // A failed seed leaves the last good replica in place — never
+        // overwrite it with an empty one (the old seedError write is what
+        // served an empty book to the sheet sync on 2026-10-23).
         console.error(`seedBetsReplicaFromAirtable page ${page + 1} failed: HTTP ${res.status}`);
-        if (kv) await kv.put(BETS_REPLICA_KEY, JSON.stringify({ updatedAt: (/* @__PURE__ */ new Date()).toISOString(), records: [], seedError: true }), { expirationTtl: 900 });
         return null;
       }
       const data = await res.json();
@@ -13357,8 +13369,8 @@ async function seedBetsReplicaFromAirtable(env) {
     console.log(`seedBetsReplicaFromAirtable: stored ${records.length} records`);
     return records;
   } catch (err) {
+    // Same rule as the page failure above: keep the last good replica.
     console.error("seedBetsReplicaFromAirtable failed:", err.message);
-    if (kv) await kv.put(BETS_REPLICA_KEY, JSON.stringify({ updatedAt: (/* @__PURE__ */ new Date()).toISOString(), records: [], seedError: true }), { expirationTtl: 900 });
     return null;
   }
 }
