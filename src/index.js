@@ -27,6 +27,16 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-10-28 6:35 PM ET",
+    notes: `CONFIDENCE IN THE 80+ BAND IS CAPPED AT 79. The 30-day calibration review found the top band overstated: 20 picks at 80+ went 12-8 (60%) against an 83% average stated confidence. Published confidence at 80 or above now logs at 79, every league, applied after band calibration and the NFL deflation. Down-only: nothing below 80 moves and no number ever rises. Market-anchor picks keep the market's implied price as their stated confidence, same as the NFL deflation exemption. Untouched: shrinkage 0.40, the band fit, the shrinkage floor, grading. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
+    date: "2026-10-28 9:35 AM ET",
+    notes: `NOTIFICATIONS SHOW THE WHOLE MESSAGE. Alert text is no longer cut anywhere: the stored body cap is raised, and bundled pick alerts now carry every pick in the body instead of stopping after 8 lines with a "+N more" tail. Tapping a notification no longer lands on the home page — every alert without a destination of its own now opens a screen showing the full message, backed by a per-user alert history kept for 7 days (new /api/alerts/history route). Recaps still tap through to /stats. The prediction pipeline is untouched. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-23 11:44 AM ET",
     notes: `THE REPLICA CARRIES THE WHOLE BOOK AGAIN. The copy of the record that feeds the stats and the sheet was capped at 3,000 picks — past that, the oldest graded picks silently fell out, and season totals shrank instead of growing. One failed read could also replace the whole copy with an empty one; that is what blanked the sheet on October 23. The copy now paginates through the entire table, and a failed read leaves the last good copy in place. The sheet sync also refuses any fetch that comes back with less than half the book. Model stays 1.7.2.`
   },
@@ -14996,6 +15006,21 @@ function applyNflConfidenceDeflation(confidencePct) {
   return Math.max(51, confidencePct - NFL_CONFIDENCE_DEFLATION_PTS);
 }
 __name(applyNflConfidenceDeflation, "applyNflConfidenceDeflation");
+const TOP_BAND_CONFIDENCE_CAP_PCT = 79;
+function applyTopBandConfidenceCap(confidencePct) {
+  // 80+ band cap (2026-10-28): the trailing-30d calibration review found
+  // the 80+ band overstated - 20 picks went 12-8 (60.0%) against an 83.0%
+  // average stated confidence. Published confidence in the 80+ band is
+  // capped at 79, all leagues, applied after band calibration and the
+  // NFL deflation. Down-only by construction: it can only lower a number
+  // in the 80+ band, never raise one, and nothing below 80 is touched.
+  // Anchor-fallback picks are NOT capped here: their logged confidence
+  // is the market's implied price, stated as such on the record - the
+  // same exemption the NFL deflation carries.
+  if (typeof confidencePct !== "number" || confidencePct < 80) return confidencePct;
+  return TOP_BAND_CONFIDENCE_CAP_PCT;
+}
+__name(applyTopBandConfidenceCap, "applyTopBandConfidenceCap");
 function computeConfidenceCalibration(records) {
   const buckets = [
     { label: "50-59%", min: 0.5, max: 0.6 },
@@ -18658,6 +18683,33 @@ async function saveAlertQueue(kv, ns, q) {
   try { await kv.put(alertQueueKey(ns), JSON.stringify(q.slice(-ALERT_QUEUE_CAP)), { expirationTtl: ALERT_TTL }); } catch (err) {}
 }
 __name(saveAlertQueue, "saveAlertQueue");
+// Alert history: the landing screen behind every notification tap. The
+// pending queue is drained by the service worker ack the moment a
+// notification shows, so the full text of each alert is also kept here
+// (per user, 7-day TTL) for /?alert=<id> to render on tap.
+var ALERT_HIST_PREFIX = "alertHist:";
+var ALERT_HIST_CAP = 50;
+function alertHistKey(ns) { return ALERT_HIST_PREFIX + ns; }
+__name(alertHistKey, "alertHistKey");
+function alertLandingUrl(id) { return "/?alert=" + encodeURIComponent(String(id || "")); }
+__name(alertLandingUrl, "alertLandingUrl");
+async function loadAlertHistory(kv, ns) {
+  try {
+    const raw = await kv.get(alertHistKey(ns));
+    const a = raw ? JSON.parse(raw) : [];
+    return Array.isArray(a) ? a : [];
+  } catch (err) { return []; }
+}
+__name(loadAlertHistory, "loadAlertHistory");
+async function appendAlertHistory(kv, ns, entry) {
+  try {
+    if (!entry || !entry.id) return;
+    const h = await loadAlertHistory(kv, ns);
+    h.push({ id: entry.id, type: entry.type || "", title: entry.title || "ParlayKings", body: entry.body || "", url: entry.url || alertLandingUrl(entry.id), at: entry.at || Date.now() });
+    await kv.put(alertHistKey(ns), JSON.stringify(h.slice(-ALERT_HIST_CAP)), { expirationTtl: ALERT_TTL });
+  } catch (err) {}
+}
+__name(appendAlertHistory, "appendAlertHistory");
 async function alertCapReached(kv, ns, dateStr) {
   try {
     const n = parseInt(await kv.get(`alertcap:${ns}:${dateStr}`), 10) || 0;
@@ -18703,7 +18755,11 @@ async function dispatchAlert(env, ns, alert) {
     const now = Date.now();
     const today = etParts(now).date;
     if (await alertCapReached(kv, ns, today)) { out.skipped = "rate-cap"; }
-    const entry = { id: String(alert.dedupeKey || `${alert.type}:${now}`), type: alert.type, title: String(alert.title || "ParlayKings").slice(0, 120), body: String(alert.body || "").slice(0, 500), url: String(alert.url || "/").slice(0, 200), at: now };
+    const entry = { id: String(alert.dedupeKey || `${alert.type}:${now}`), type: alert.type, title: String(alert.title || "ParlayKings").slice(0, 120), body: String(alert.body || "").slice(0, 2000), at: now };
+    // A tap on the notification lands on a screen showing the full message
+    // (/?alert=<id>, backed by the alert history) unless the alert carries a
+    // real destination of its own (recaps point at /stats).
+    entry.url = alert.url && String(alert.url) !== "/" ? String(alert.url).slice(0, 200) : alertLandingUrl(entry.id);
     // Game-day team alerts bypass quiet hours by design (scores go out live);
     // every other alert type still respects them.
     if (!out.skipped && !gameAlertBypassesQuietHours(alert.type) && inQuietHoursET(prefs.quietHours, now)) { out.skipped = "quiet-hours"; }
@@ -18718,6 +18774,7 @@ async function dispatchAlert(env, ns, alert) {
       const q = await loadAlertQueue(kv, ns);
       q.push(entry);
       await saveAlertQueue(kv, ns, q);
+      await appendAlertHistory(kv, ns, entry);
     }
     out.queued = true;
     if (out.skipped) return out;
@@ -18729,6 +18786,7 @@ async function dispatchAlert(env, ns, alert) {
       let b = await loadAlertBundle(kv, ns);
       if (!b || (now - (b.since || 0)) >= ALERT_BUNDLE_WINDOW_MS) b = { items: [], since: now };
       b.items.push(bEntry);
+      await appendAlertHistory(kv, ns, bEntry);
       await saveAlertBundle(kv, ns, b);
       out.bundled = true;
       return out;
@@ -18955,14 +19013,16 @@ async function saveAlertBundle(kv, ns, b) {
 __name(saveAlertBundle, "saveAlertBundle");
 function buildBundleEntry(items, now) {
   if (items.length === 1) return items[0];
-  const lines = items.map((it) => String(it.short || it.title || "ParlayKings")).slice(0, 8);
-  if (items.length > 8) lines.push(`+${items.length - 8} more`);
+  // Every pick rides in the body. The bundle used to cut off after 8 lines
+  // with a "+N more" tail, and the rest of the text was lost for good.
+  const lines = items.map((it) => String(it.short || it.title || "ParlayKings"));
+  const id = `bundle:${now}:${items.length}`;
   return {
-    id: `bundle:${now}:${items.length}`,
+    id,
     type: items[0].type,
     title: `ParlayKings: ${items.length} new picks`,
     body: lines.join("\n"),
-    url: "/",
+    url: alertLandingUrl(id),
     at: now
   };
 }
@@ -18992,6 +19052,7 @@ async function flushAlertBundles(env, kv) {
       const q = await loadAlertQueue(kv, ns);
       q.push(entry);
       await saveAlertQueue(kv, ns, q);
+      await appendAlertHistory(kv, ns, entry);
       try {
         const code = await sendPushTicket(env, sub);
         if (code === 404 || code === 410) { try { await kv.delete(pushSubKey(ns)); } catch (err) {} }
@@ -21180,6 +21241,15 @@ ${urls.map((p) => `  <url><loc>https://parlaykings.net${p === "/" ? "/" : p}</lo
         headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }
       });
     }
+    if (url.pathname === "/api/alerts/history" && request.method === "GET") {
+      if (!convosAuthed) {
+        return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
+      }
+      const hist = await loadAlertHistory(convosKv, convosNs);
+      return new Response(JSON.stringify(hist.slice().reverse()), {
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }
+      });
+    }
     if (url.pathname === "/api/pins" && request.method === "GET") {
       if (!convosAuthed) {
         return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -21599,6 +21669,15 @@ ${sim.why}`;
             cleanText = cleanText.split(`${preDeflation}%`).join(`${deflatedConfidence}%`);
             console.log(`NFL deflation: ${actualProvider} confidence ${preDeflation}% -> ${deflatedConfidence}%`);
             pick.confidence = deflatedConfidence;
+          }
+        }
+        if (pick && !isFiftyFiftyWinner(pick.winner) && typeof pick.confidence === "number") {
+          const preCap = pick.confidence;
+          const cappedConfidence = applyTopBandConfidenceCap(preCap);
+          if (cappedConfidence !== preCap) {
+            cleanText = cleanText.split(`${preCap}%`).join(`${cappedConfidence}%`);
+            console.log(`80+ band cap: ${actualProvider} confidence ${preCap}% -> ${cappedConfidence}%`);
+            pick.confidence = cappedConfidence;
           }
         }
         let alreadyLoggedMatch = null;
@@ -23556,12 +23635,59 @@ ${sportsbookDrawerHtml()}
       addMsg("ai", "Couldn't load that prediction — open chat history to find it.");
     });
   }
+  function openAlertView(id) {
+    try {
+      var old = document.getElementById("pkAlertView");
+      if (old) old.remove();
+      var wrap = document.createElement("div");
+      wrap.id = "pkAlertView";
+      wrap.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.65);display:flex;align-items:flex-start;justify-content:center;padding:24px 14px;overflow-y:auto;";
+      var card = document.createElement("div");
+      card.style.cssText = "background:#1a1033;border:1px solid #d4af37;border-radius:14px;max-width:560px;width:100%;padding:20px 18px;color:#ffffff;font-family:inherit;box-shadow:0 12px 40px rgba(0,0,0,0.5);";
+      var title = document.createElement("div");
+      title.style.cssText = "font-size:19px;font-weight:700;line-height:1.3;margin-bottom:6px;";
+      title.textContent = "ParlayKings";
+      var when = document.createElement("div");
+      when.style.cssText = "font-size:13px;opacity:0.75;margin-bottom:12px;";
+      var body = document.createElement("div");
+      body.style.cssText = "font-size:16px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;";
+      body.textContent = "Loading...";
+      var close = document.createElement("button");
+      close.textContent = "Close";
+      close.style.cssText = "margin-top:18px;background:#d4af37;color:#1a1033;border:none;border-radius:8px;padding:10px 22px;font-size:15px;font-weight:700;cursor:pointer;";
+      close.addEventListener("click", function() { wrap.remove(); });
+      wrap.addEventListener("click", function(ev) { if (ev.target === wrap) wrap.remove(); });
+      card.appendChild(title);
+      card.appendChild(when);
+      card.appendChild(body);
+      card.appendChild(close);
+      wrap.appendChild(card);
+      document.body.appendChild(wrap);
+      fetch("/api/alerts/history", { credentials: "same-origin", headers: { "Cache-Control": "no-store" } }).then(function(r) {
+        if (r.status === 401) { body.textContent = "Sign in to read this notification."; return null; }
+        return r.ok ? r.json() : null;
+      }).then(function(list) {
+        if (!list) { if (body.textContent === "Loading...") body.textContent = "Couldn't load that notification."; return; }
+        var hit = null;
+        for (var i = 0; i < list.length; i++) { if (list[i] && list[i].id === id) { hit = list[i]; break; } }
+        if (!hit) { body.textContent = "That notification is no longer available. Notifications are kept for 7 days."; return; }
+        title.textContent = hit.title || "ParlayKings";
+        try { when.textContent = new Date(hit.at || Date.now()).toLocaleString(); } catch (e) {}
+        body.textContent = hit.body || "";
+      }).catch(function() { body.textContent = "Couldn't load that notification."; });
+    } catch (e) {}
+  }
   function resumeBgJobs() {
     try {
       const qj = new URLSearchParams(location.search).get("job");
       if (qj && /^[A-Za-z0-9-]{1,64}$/.test(qj)) {
         try { window.history.replaceState(null, "", window.location.pathname); } catch (e) {}
         resumeJob(qj);
+      }
+      const qa = new URLSearchParams(location.search).get("alert");
+      if (qa) {
+        try { window.history.replaceState(null, "", window.location.pathname); } catch (e) {}
+        openAlertView(qa);
       }
       let hasBg = false;
       try { hasBg = localStorage.getItem("pk_bg") === "1"; } catch (e) {}
@@ -23604,6 +23730,8 @@ ${sportsbookDrawerHtml()}
         try {
           const d = ev && ev.data;
           if (!d || d.type !== "pk-open-url" || !d.url) return;
+          const ma = /[?&]alert=([^&]{1,200})/.exec(String(d.url));
+          if (ma) { try { openAlertView(decodeURIComponent(ma[1])); } catch (e) { openAlertView(ma[1]); } return; }
           const m = /[?&]job=([A-Za-z0-9-]{1,64})/.exec(String(d.url));
           if (m) { resumeJob(m[1]); return; }
           try { window.location.href = String(d.url); } catch (e) {}

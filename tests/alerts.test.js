@@ -33,7 +33,7 @@ for (const fn of ['normalizeAlertPrefs', 'etParts', 'inQuietHoursET',
   'collectInterests', 'interestMatches', 'fmtLinePrice',
   'buildHighEdgeAlert', 'groupRecapByLeague', 'buildRecapAlert',
   'fetchGradedRecords',
-  'movementDirection', 'buildLineMoveAlert', 'buildBundleEntry',
+  'movementDirection', 'buildLineMoveAlert', 'buildBundleEntry', 'alertLandingUrl',
   'shortTeamName', 'americanToImplied', 'parseAmericanPrice', 'parseOpeningLineFromText']) {
   eval(extract(fn));
 }
@@ -133,13 +133,23 @@ function eq(a, b, msg) {
   ], 1000);
   eq(b3.title, 'ParlayKings: 3 new picks', 'multi-item bundle gets a combined title');
   eq(b3.body, 's1\ns2\ns3', 'bundle body lists one compact line per pick');
-  eq(b3.url, '/', 'bundle links home');
+  eq(b3.url, '/?alert=' + encodeURIComponent(b3.id), 'bundle tap lands on the full-message screen');
+  const many = [];
+  for (let i = 1; i <= 10; i++) many.push({ id: 'm' + i, type: 'highEdge', title: 't' + i, body: 'b' + i, short: 's' + i, url: '/', at: i });
+  const b10 = buildBundleEntry(many, 2000);
+  eq(b10.body.split('\n').length, 10, 'bundle body carries every pick, no cut-off');
+  eq(b10.body.includes('more'), false, 'bundle body has no "+N more" tail');
+  eq(alertLandingUrl('he:rec1:user-x'), '/?alert=he%3Arec1%3Auser-x', 'landing URL encodes the alert id');
 
   // Wiring: single choke point, routes, cron, log hook, sw pull, columns.
   eq(src.includes('async function dispatchAlert(env, ns, alert)'), true, 'dispatcher is the single send choke point');
   eq(src.includes('sendPushTicket(env, sub)') && src.includes('await dispatchAlert(env, u.ns'), true, 'all alert pushes flow through the dispatcher');
   eq(src.includes('url.pathname === "/api/alerts/pending"'), true, 'pending-alerts route present');
   eq(src.includes('url.pathname === "/api/alerts/ack"'), true, 'alert-ack route present');
+  eq(src.includes('url.pathname === "/api/alerts/history"'), true, 'alert-history route present (landing screen data)');
+  eq(src.includes('await appendAlertHistory(kv, ns, entry);'), true, 'dispatcher records every alert in history');
+  eq(src.includes('function openAlertView(id)'), true, 'frontend landing screen for notification taps present');
+  eq(src.includes('entry.url = alert.url && String(alert.url) !== "/"'), true, 'alerts without their own destination tap through to the landing screen');
   eq(src.includes('url.pathname === "/admin/send-announcement"'), true, 'admin send-announcement route present');
   eq(src.includes('async function fanoutAnnouncement(env, title, body, targetUrl)'), true, 'announcement fan-out function present');
   eq(src.includes('type: "announcement"'), true, 'fan-out sends the announcement alert type');

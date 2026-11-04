@@ -141,9 +141,24 @@ function loggedFields(tag, sim) {
     }
     defRange = { start: ifStart, end: i };
   }
-  const allowed = lockRanges.concat([{ start: calStart, end: calEnd }, anchorRange, defRange]);
+  // 80+ band cap block (2026-10-28): a sanctioned rewrite site in the
+  // chat handler, immediately after the NFL deflation.
+  const capAnchor = 'applyTopBandConfidenceCap(preCap)';
+  const capIdx = src.indexOf(capAnchor);
+  eq(capIdx >= 0, true, '80+ band cap application present');
+  let capRange = { start: -2, end: -1 };
+  if (capIdx >= 0) {
+    const ifStart = src.lastIndexOf('if (pick && !isFiftyFiftyWinner(pick.winner)', capIdx);
+    let i = src.indexOf('{', ifStart), depth = 0;
+    for (; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      if (src[i] === '}') { depth--; if (!depth) break; }
+    }
+    capRange = { start: ifStart, end: i };
+  }
+  const allowed = lockRanges.concat([{ start: calStart, end: calEnd }, anchorRange, defRange, capRange]);
   const strays = writes.filter((k) => !allowed.some((r) => k > r.start && k < r.end));
-  eq(strays.length, 0, 'no pick.confidence rewrite outside sim lock + calibration + fifty stand + market anchor + NFL deflation');
+  eq(strays.length, 0, 'no pick.confidence rewrite outside sim lock + calibration + fifty stand + market anchor + NFL deflation + 80+ band cap');
 
   console.log(pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
