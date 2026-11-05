@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-04 10:12 PM ET",
+    notes: `SHADOW GUARD INSTRUMENTATION: A MARKET COVERAGE GUARD NOW RUNS IN SHADOW MODE. The post-anchor audit (Oct 20 - Nov 4, 441 graded picks with market snapshots) found SAM at 66.0% against 67.1% for simply following the market favorite on the same games, and found the live gate's one blind spot: when a Polymarket snapshot exists but is not liquidity-qualified, the gate's sportsbook fallback reads only the reply text's market line, so picks logged ungated even when a book price had been fetched for the matchup — 24 dissents escaped in the window, 19 of them carrying a book line, and in 16 of those the book agreed the pick was the underdog. A shadow guard now judges the model's original pick at logging against a two-source reference — qualified Polymarket first, a price-quality-checked sportsbook line second (both sides priced, the pair summing 95-118), material disagreement between the sources flagged as its own verdict, and would-abstain when neither reference is reliable — and writes the verdict, the original pick, both prices, and the reason to the record as a SHADOWGUARD block. It changes no pick, no confidence, and no gate: the simulation, the market anchor, calibration, and grading are untouched. The guard earns enforcement only if its shadow record beats the live system on future games; the 1.7.3 version stays conditional on that measurement. Model stays 1.7.2. Tests: tests/shadow-guard.test.js (25 checks); full suite green.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-10-28 6:35 PM ET",
     notes: `CONFIDENCE IN THE 80+ BAND IS CAPPED AT 79. The 30-day calibration review found the top band overstated: 20 picks at 80+ went 12-8 (60%) against an 83% average stated confidence. Published confidence at 80 or above now logs at 79, every league, applied after band calibration and the NFL deflation. Down-only: nothing below 80 moves and no number ever rises. Market-anchor picks keep the market's implied price as their stated confidence, same as the NFL deflation exemption. Untouched: shrinkage 0.40, the band fit, the shrinkage floor, grading. Model stays 1.7.2.`
   },
@@ -12548,6 +12553,91 @@ function marketAnchorDecision(pick, snap) {
 function anchorPrefix(prefix, pick) {
   return pick && pick._anchorNote ? `${prefix} \xB7 ${pick._anchorNote}` : prefix;
 }
+function shadowSnapUsable(s) {
+  if (!s) return false;
+  const w = Number(s.winnerImplied), o = Number(s.otherImplied);
+  return Number.isFinite(w) && Number.isFinite(o) && w > 0 && w < 100 && o > 0 && o < 100 && String(s.otherName || "").trim().length > 0;
+}
+function shadowBookQualityOk(s) {
+  // A sportsbook line is a reliable reference only when both sides are
+  // priced and the pair carries a sane book margin: books price both
+  // sides with vig, so the pair sums a little over 100. A partial or
+  // broken quote sums far outside that band and must not become an
+  // authoritative reference just because Polymarket is thin.
+  if (!shadowSnapUsable(s)) return false;
+  const sum = Number(s.winnerImplied) + Number(s.otherImplied);
+  return sum >= 95 && sum <= 118;
+}
+function shadowGuardDecision(origPick, polySnap, bookSnap) {
+  // THE SHADOW GUARD (2026-11-04, Drew's order): measurement only. The
+  // post-anchor audit (Oct 20 - Nov 4, 441 snapshot-classified graded
+  // picks) found the live gate's one blind spot: when a Polymarket
+  // snapshot exists but is NOT liquidity-qualified, the gate's fallback
+  // reads only the reply text's market line, so a pick can log ungated
+  // even when a sportsbook price was fetched for the matchup (19 of the
+  // window's 24 unqualified dissents carried a book line; in 16 the book
+  // agreed the pick was the underdog). This function judges the model's
+  // ORIGINAL pick against a two-source reference and returns a verdict
+  // that is written to the record as a SHADOWGUARD block. It changes no
+  // pick, no confidence, and no gate. The proposed guard earns
+  // enforcement only if the shadow record shows it beating the live
+  // system on future games; until then SAM 1.7.3 stays conditional and
+  // the model stays 1.7.2.
+  // Reference order: qualified Polymarket first, a price-quality-checked
+  // sportsbook line second, neither -> would-abstain. When both sources
+  // are usable and they materially disagree (different favorites, or 10+
+  // points apart on the picked side), the verdict is sources-disagree:
+  // flag the uncertainty, favor neither.
+  const out = { v: 1, verdict: "would-abstain", reason: "no reliable market reference", refSource: "none",
+    originalWinner: origPick ? String(origPick.winner || "") : "",
+    originalConfidence: null, wouldMoveTo: null, favImplied: null, gap: null,
+    poly: null, book: null };
+  let conf = origPick ? Number(origPick.confidence) : NaN;
+  if (conf > 0 && conf <= 1) conf = conf * 100;
+  if (Number.isFinite(conf)) out.originalConfidence = Math.round(conf);
+  if (shadowSnapUsable(polySnap)) out.poly = { winnerImplied: Number(polySnap.winnerImplied), otherImplied: Number(polySnap.otherImplied), qualified: polySnap.anchorQualified === true };
+  if (shadowSnapUsable(bookSnap)) out.book = { winnerImplied: Number(bookSnap.winnerImplied), otherImplied: Number(bookSnap.otherImplied), book: bookSnap.bookmakerTitle || null, qualityOk: shadowBookQualityOk(bookSnap) };
+  const polyQualified = out.poly && out.poly.qualified ? polySnap : null;
+  const polyAny = out.poly ? polySnap : null;
+  const book = out.book && out.book.qualityOk ? bookSnap : null;
+  if (polyAny && book) {
+    const pw = Number(polyAny.winnerImplied), bw = Number(book.winnerImplied);
+    const favDiff = (pw >= 50) !== (bw >= 50);
+    if (favDiff || Math.abs(pw - bw) >= 10) {
+      out.verdict = "sources-disagree";
+      out.refSource = "both";
+      out.reason = favDiff ? "sources name different favorites" : `sources differ by ${Math.round(Math.abs(pw - bw))} points on the picked side`;
+      return out;
+    }
+  }
+  const ref = polyQualified || book;
+  if (!ref) {
+    out.reason = out.poly && !out.poly.qualified
+      ? "Polymarket snapshot present but not liquidity-qualified, and no reliable sportsbook line"
+      : (out.book ? "sportsbook line failed the price-quality checks, and no qualified Polymarket price" : "no qualified Polymarket price and no sportsbook line");
+    return out;
+  }
+  out.refSource = polyQualified ? "polymarket" : "sportsbook";
+  const dec = marketAnchorDecision({ confidence: origPick ? origPick.confidence : NaN }, ref);
+  if (dec.action === "flip") {
+    out.verdict = "would-move";
+    out.wouldMoveTo = dec.favName;
+    out.favImplied = dec.favImplied;
+    out.gap = dec.gap;
+    out.reason = `outside the dissent zone against the ${out.refSource} reference`;
+  } else if (dec.sided) {
+    out.verdict = "pass";
+    out.reason = `pick sides with the ${out.refSource} favorite`;
+  } else if (dec.dissent) {
+    out.verdict = "pass";
+    out.gap = dec.gap;
+    out.reason = `dissent inside the zone against the ${out.refSource} reference`;
+  } else {
+    out.verdict = "pass";
+    out.reason = "reference raises no objection";
+  }
+  return out;
+}
 const POLYMARKET_SERIES_BY_LEAGUE = { NFL: [12185], NBA: [10345], NHL: [10346], MLB: [3], NCAAF: [12756], CFB: [12756], WNBA: [10105], UFC: [38], WTA: [10366], ATP: [10365], TENNIS: [10365, 10366] };
 function polymarketTeamKey(name) {
   return String(name || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[.'\u2019]/g, "").replace(/\s+/g, " ").trim();
@@ -13744,7 +13834,16 @@ function notesWithReplyAndOdds(prefix, fullReplyText, pick) {
     const poly = flipped ? reorientSnapshotForFlip(pick._polymarket, pick._anchorFlip) : pick._polymarket;
     out = appendPolymarketSnapshotToNotes(out, poly);
   }
+  // The shadow guard verdict describes the model's ORIGINAL pick, so it
+  // is written exactly as judged at logging — never re-based on a flip.
+  if (pick && pick._shadowGuard) {
+    out = appendShadowGuardToNotes(out, pick._shadowGuard);
+  }
   return out;
+}
+function appendShadowGuardToNotes(notes, sg) {
+  if (!notes || !sg || !sg.verdict) return notes;
+  return `${notes}\n---SHADOWGUARD---${JSON.stringify(sg)}`;
 }
 function appendPolymarketSnapshotToNotes(notes, poly) {
   if (!notes || !poly || poly.winnerImplied == null) return notes;
@@ -14388,6 +14487,21 @@ async function _logBetToAirtableInner(env, pick, originalQuestion, provider, bet
             _snap.otherImplied = americanToImplied(_snap.otherPrice);
           }
         }
+        // Shadow guard (2026-11-04): judge the model's ORIGINAL pick
+        // against the two-source reference and stash the verdict on the
+        // pick; notesWithReplyAndOdds writes it to the record as a
+        // SHADOWGUARD block. Runs before the live gate below can move
+        // the pick, reads only copies, and changes nothing.
+        try {
+          let _sgBook = parseOpeningLineFromText(fullReplyText);
+          if (_sgBook && _sgBook.otherImplied == null && Number.isFinite(_sgBook.otherPrice)) {
+            _sgBook = { ..._sgBook, otherImplied: americanToImplied(_sgBook.otherPrice) };
+          }
+          if (!_sgBook && pick._marketOdds) _sgBook = pick._marketOdds;
+          const _sg = shadowGuardDecision({ winner: pick.winner, confidence: pick.confidence }, pick._polymarket || null, _sgBook || null);
+          _sg.ts = new Date().toISOString();
+          pick._shadowGuard = _sg;
+        } catch (e) { console.error("shadow guard failed:", e.message); }
         const _dec = marketAnchorDecision(pick, _snap);
         if (_dec.action === "flip") {
           const _dogName = pick.winner;
