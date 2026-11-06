@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-06 7:46 AM ET",
+    notes: `TEAM-NAME GUARD ON MARKET SNAPSHOTS. A market line is now trusted only when the side it names against the pick is actually the other team in the matchup. On the morning of November 6 the fetched book line for Wagner vs Miami named Virginia Cavaliers as the other side — a different game's line, crossed at fetch time — and the market anchor moved the logged pick onto that phantom favorite at 98%; the model's own pick was Miami at 60%. Deleting the record and re-running reproduced the same wrong pick, because the crossing happens when the line is fetched, not when the record is written. The anchor gate and the shadow judge now run the same check: a snapshot whose named other side does not match the matchup's other team is ignored entirely, the sim's pick logs exactly as generated, and a dropped snapshot is recorded on the shadow verdict. Name forms still match the way they always have (full name, short form, or nickname). Untouched: the anchor bars, the dissent zone, calibration, grading. Tests: tests/team-name-guard.test.js (21 checks); full suite green. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-04 10:12 PM ET",
     notes: `SHADOW GUARD INSTRUMENTATION: A MARKET COVERAGE GUARD NOW RUNS IN SHADOW MODE. The post-anchor audit (Oct 20 - Nov 4, 441 graded picks with market snapshots) found SAM at 66.0% against 67.1% for simply following the market favorite on the same games, and found the live gate's one blind spot: when a Polymarket snapshot exists but is not liquidity-qualified, the gate's sportsbook fallback reads only the reply text's market line, so picks logged ungated even when a book price had been fetched for the matchup — 24 dissents escaped in the window, 19 of them carrying a book line, and in 16 of those the book agreed the pick was the underdog. A shadow guard now judges the model's original pick at logging against a two-source reference — qualified Polymarket first, a price-quality-checked sportsbook line second (both sides priced, the pair summing 95-118), material disagreement between the sources flagged as its own verdict, and would-abstain when neither reference is reliable — and writes the verdict, the original pick, both prices, and the reason to the record as a SHADOWGUARD block. It changes no pick, no confidence, and no gate: the simulation, the market anchor, calibration, and grading are untouched. The guard earns enforcement only if its shadow record beats the live system on future games; the 1.7.3 version stays conditional on that measurement. Model stays 1.7.2. Tests: tests/shadow-guard.test.js (25 checks); full suite green.`
   },
@@ -12550,6 +12555,31 @@ function marketAnchorDecision(pick, snap) {
   if (!favName) return { action: "keep" };
   return { action: "flip", impl, gap, favName, favImplied: otherImpl };
 }
+function snapshotMatchesMatchup(snap, pick) {
+  // Team-name guard (2026-11-06, Drew's order): a market snapshot is
+  // usable only when the side it names against the pick is actually
+  // the other team in the matchup. On 2026-11-06 the fetched book
+  // line for Wagner vs Miami named "Virginia Cavaliers" as the other
+  // side — a different game's line — and the anchor moved the pick
+  // onto that phantom favorite at 98%; deleting the record and
+  // re-running reproduced it exactly, because the crossing happens
+  // at fetch time. When the matchup's sides cannot be determined,
+  // the pick's side cannot be located in them, or the snapshot names
+  // no other side, this check does not fire and behavior is
+  // unchanged; the failure direction is conservative (a good line
+  // rejected by mistake only costs the anchor's input, never moves
+  // a pick onto a wrong team).
+  if (!snap || !pick) return true;
+  const other = String(snap.otherName || "").trim();
+  if (!other) return true;
+  const sides = splitMatchupSides(pick.matchup || "");
+  if (!sides || sides.length !== 2) return true;
+  const winner = String(pick.winner || "").trim();
+  if (!winner) return true;
+  const otherSide = oddsNameMatches(sides[0], winner) ? sides[1] : (oddsNameMatches(sides[1], winner) ? sides[0] : null);
+  if (!otherSide) return true;
+  return oddsNameMatches(other, otherSide);
+}
 function anchorPrefix(prefix, pick) {
   return pick && pick._anchorNote ? `${prefix} \xB7 ${pick._anchorNote}` : prefix;
 }
@@ -12592,6 +12622,16 @@ function shadowGuardDecision(origPick, polySnap, bookSnap) {
     originalWinner: origPick ? String(origPick.winner || "") : "",
     originalConfidence: null, wouldMoveTo: null, favImplied: null, gap: null,
     poly: null, book: null };
+  // Team-name guard (2026-11-06): when the matchup is known, a
+  // snapshot naming a different game's other side is dropped as a
+  // reference before any judging, and the drop is recorded on the
+  // verdict (nameGuard) so the shadow record shows why.
+  if (origPick && origPick.matchup) {
+    const drops = {};
+    if (polySnap && !snapshotMatchesMatchup(polySnap, origPick)) { polySnap = null; drops.poly = true; }
+    if (bookSnap && !snapshotMatchesMatchup(bookSnap, origPick)) { bookSnap = null; drops.book = true; }
+    if (drops.poly || drops.book) out.nameGuard = drops;
+  }
   let conf = origPick ? Number(origPick.confidence) : NaN;
   if (conf > 0 && conf <= 1) conf = conf * 100;
   if (Number.isFinite(conf)) out.originalConfidence = Math.round(conf);
@@ -14480,12 +14520,21 @@ async function _logBetToAirtableInner(env, pick, originalQuestion, provider, bet
     if (pick && !isFiftyFiftyWinner(pick.winner)) {
       try {
         let _snap = pick._polymarket && pick._polymarket.anchorQualified !== false ? pick._polymarket : null;
-        const _polySnap = _snap;
+        let _polySnap = _snap;
         if (!_snap) {
           _snap = parseOpeningLineFromText(fullReplyText);
           if (_snap && _snap.otherImplied == null && Number.isFinite(_snap.otherPrice)) {
             _snap.otherImplied = americanToImplied(_snap.otherPrice);
           }
+        }
+        // Team-name guard (2026-11-06): if the chosen snapshot names
+        // an other side that is not this matchup's other team, the
+        // line belongs to a different game and the gate must not see
+        // it — the sim's pick then logs exactly as generated.
+        if (_snap && !snapshotMatchesMatchup(_snap, pick)) {
+          console.error("market anchor: snapshot failed the team-name guard, ignoring it:", JSON.stringify({ matchup: pick.matchup, winner: pick.winner, otherName: _snap.otherName }));
+          _snap = null;
+          _polySnap = null;
         }
         // Shadow guard (2026-11-04): judge the model's ORIGINAL pick
         // against the two-source reference and stash the verdict on the
@@ -14498,7 +14547,7 @@ async function _logBetToAirtableInner(env, pick, originalQuestion, provider, bet
             _sgBook = { ..._sgBook, otherImplied: americanToImplied(_sgBook.otherPrice) };
           }
           if (!_sgBook && pick._marketOdds) _sgBook = pick._marketOdds;
-          const _sg = shadowGuardDecision({ winner: pick.winner, confidence: pick.confidence }, pick._polymarket || null, _sgBook || null);
+          const _sg = shadowGuardDecision({ winner: pick.winner, confidence: pick.confidence, matchup: pick.matchup }, pick._polymarket || null, _sgBook || null);
           _sg.ts = new Date().toISOString();
           pick._shadowGuard = _sg;
         } catch (e) { console.error("shadow guard failed:", e.message); }
