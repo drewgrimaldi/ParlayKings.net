@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-06 11:20 PM ET",
+    notes: `ASK SAM GOES TO SAM. In the menu on parlaykings.net pages like Stats, the Ask SAM item pointed at the site root, so it landed on the home page instead of the chat. It now hands off to the analyzer, signed in, the same way the Launch link on the home page does. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-06 11:12 PM ET",
     notes: `BELL OPENS ON NOTIFICATIONS AGAIN. Once the settings view had been opened, the panel remembered it and every bell tap landed back on settings. The bell now always opens on the notifications list; settings stays one tap away on the gear, or by tapping your name in the menu. Model stays 1.7.2.`
   },
@@ -1933,6 +1938,7 @@ function samNetworkNavHtml({ signedIn, isAdmin, current, hostname } = {}) {
     <a class="nav-link" href="https://grimaldi.tv/Episodes">EPISODES</a>`;
   const grimUnderTrivia = `<a class="nav-link" href="https://grimaldi.tv/">GRIMALDI.TV</a>`;
   const analyzerLabel = parlayHost ? "\u2B50 Ask SAM" : "\u2B50 LAUNCH SPORTS ANALYZER";
+  const analyzerHref = parlayHost ? "/sso/handoff?to=https%3A%2F%2Fai.grimaldi.tv%2F" : "/";
   return `<button class="nav-toggle" type="button" onclick="toggleNavMenu(event)" aria-label="Menu"><span></span><span></span><span></span></button>
 <div class="nav-overlay" id="nav-overlay" onclick="closeNavMenu()"></div>
 <div class="nav-drawer" id="nav-drawer">
@@ -1944,7 +1950,7 @@ function samNetworkNavHtml({ signedIn, isAdmin, current, hostname } = {}) {
     ${podcastLinks ? `<div class="nav-section-title">THE DREW GRIMALDI PODCAST</div>
     ${podcastLinks}` : ""}
     <div class="nav-section-title">SPORTS</div>
-    <a class="nav-link${on("/")}" href="/">${analyzerLabel}</a>
+    <a class="nav-link${on("/")}" href="${analyzerHref}">${analyzerLabel}</a>
     <a class="nav-link" href="/sso/handoff?to=https://football.grimaldi.tv/">FOOTBALL (NCAAF/NFL)</a>
     <a class="nav-link" href="/sso/handoff?to=https://mlb.grimaldi.tv/">BASEBALL (MLB)</a>
     <a class="nav-link" href="/sso/handoff?to=https://basketball.grimaldi.tv/">Basketball</a>
