@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-06 9:16 PM ET",
+    notes: `THE BIG BANNER GOES HOME. The Parlay Kings banner at the top of the analyzer now links to parlaykings.net — the landing page is the front door, and the banner takes you there. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-06 9:12 PM ET",
     notes: `THE WORKFLOW SCREEN IS ADMIN-ONLY. The public no longer sees it: the Workflow links in the app menus and footer now appear only for the admin account, the page itself sends everyone else back to the home page, and it is out of the sitemap. Model stays 1.7.2.`
   },
@@ -23537,7 +23542,7 @@ ${sportsbookDrawerHtml()}
 
   <div class="header">
     <button class="share-btn" type="button" aria-label="Share this page" onclick="sharePage(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14V3"/><path d="M8.5 6.5L12 3l3.5 3.5"/><path d="M5 10v10h14V10"/></svg></button>
-    <img class="header-banner" src="/assets/banner.jpg" alt="Parlay Kings">
+    <a href="https://parlaykings.net" style="display:block" aria-label="ParlayKings.net — the club home"><img class="header-banner" src="/assets/banner.jpg" alt="Parlay Kings"></a>
     <div class="flag-strip"><span class="r"></span><span class="w"></span><span class="b"></span></div>
     <div class="spins-badge" id="spins-badge">
       <span class="spins-btn" onclick="toggleSpinsMenu(event)"><span id="spins-count">${initialPredictions}</span> <span class="spins-label">Predictions Remaining</span></span>
