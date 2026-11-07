@@ -50,7 +50,7 @@ const names = ['isParlayLandingHost', 'landingHtmlForHost', 'landingEtToday', 'l
   'landingAddDays', 'landingConfPct', 'landingResultOf', 'buildLandingPayload',
   'todayET', 'boardDateKey', 'boardConfPct', 'boardAnalysisOf', 'boardResultSummaryOf',
   'boardPickFromRecord', 'boardChooseDate', 'boardBandRates', 'boardRankDay',
-  'boardVisiblePicks', 'buildLandingBoard'];
+  'boardVisiblePicks', 'buildLandingBoard', 'teamLogoPair'];
 const code = names.map(extractFn).join('\n');
 eval('var LANDING_HTML = ' + JSON.stringify(EMBEDDED_HTML) + ';\n' + code +
   '\n;global.__x = { isParlayLandingHost, landingHtmlForHost, buildLandingPayload, landingAddDays, buildLandingBoard };');
