@@ -72,7 +72,7 @@ check('served page has no sample notifications', served.indexOf('sample notifica
 check('served Sign In stays same-host and returns to the landing page', served.indexOf('href="/login?redirect=%2F"') !== -1);
 check('served page navigation has no Todays Board item', served.indexOf('<a href="#picks">Today\'s Board</a>') === -1);
 check('served page unlocks the board in place via the gated route', served.indexOf('/api/landing-board') !== -1);
-check('served page bounces once through the SSO handoff when unsigned', served.indexOf('sso/handoff?to=') !== -1 && served.indexOf('pkSsoBounce') !== -1);
+check('served page does not auto-bounce through the SSO handoff', served.indexOf('pkSsoBounce') === -1);
 check('served page has no member-board preview link and no per-game room links', served.indexOf('Preview the member board') === -1 && served.indexOf('View in the ') === -1 && served.indexOf('Prediction locked') !== -1);
 check('/board route redirects to the front door', src.indexOf('Location: "https://parlaykings.net/"') !== -1 && src.indexOf('return handleBoardPage(request, env, session, url)') === -1);
 check('served page has no ai.grimaldi.tv login link', served.indexOf('https://ai.grimaldi.tv/login') === -1);
