@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-06 7:52 PM ET",
+    notes: `THE FRONT DOOR IS THE FRONT DOOR FOR EVERYONE. parlaykings.net's root now serves the landing page to the slate admin too — the last exemption is gone, so the owner opening his own site gets the page the audience gets, signed in or not. The runner home did not move: it lives on ai.grimaldi.tv, where it always also lived, and the three morning jobs (5 AM warm-up, 5:30 run-all, 8 AM retry) were repointed to drive it there instead — same typed-username sign-in, same /api/slate verification, same one-click design, verified working on that host before the switch. Stripe purchase returns still keep the app flow. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-06 7:49 PM ET",
     notes: `TODAY'S BOARD REMOVED FROM THE APP MENUS. The Today's Board item is out of both app drawers (the shared network nav and the chat nav). It pointed at the retired /board page; the board lives on the parlaykings.net landing page now, and the label is gone everywhere it was added. Everything else in the menus is untouched. Model stays 1.7.2.`
   },
@@ -23299,12 +23304,13 @@ ${samNetworkNavHtml({ signedIn: !!session, isAdmin: isSlateAdmin(session), curre
       });
     }
     // Landing page is the ParlayKings front door (live 2026-11-06):
-    // parlay hosts serve the club landing page at the root, for signed-
-    // out visitors and signed-in members alike — the member's board is
-    // one tap away and the bell carries their real alerts. The slate
-    // admin keeps the app home (the morning run-all drives it), and a
+    // parlay hosts serve the club landing page at the root to EVERYONE —
+    // signed-out visitors, members, and the slate admin alike. The
+    // runner home the morning jobs drive lives on ai.grimaldi.tv (the
+    // warm-up, run-all, and retry jobs were repointed there the same
+    // night, 2026-11-06), so nothing needs the app at this root. A
     // Stripe return keeps the app flow that fulfills the purchase.
-    if (url.pathname === "/" && request.method === "GET" && isParlayLandingHost(url.hostname) && !isSlateAdmin(session) && !url.searchParams.has("purchase")) {
+    if (url.pathname === "/" && request.method === "GET" && isParlayLandingHost(url.hostname) && !url.searchParams.has("purchase")) {
       return new Response(landingHtmlForHost(), {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });
