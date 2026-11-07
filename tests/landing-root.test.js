@@ -47,10 +47,13 @@ const htmlMatch = src.match(/const LANDING_HTML = ("(?:\\.|[^"\\])*");/);
 check('LANDING_HTML constant embedded', !!htmlMatch);
 const EMBEDDED_HTML = htmlMatch ? JSON.parse(htmlMatch[1]) : '';
 const names = ['isParlayLandingHost', 'landingHtmlForHost', 'landingEtToday', 'landingLongLabel',
-  'landingAddDays', 'landingConfPct', 'landingResultOf', 'buildLandingPayload'];
+  'landingAddDays', 'landingConfPct', 'landingResultOf', 'buildLandingPayload',
+  'todayET', 'boardDateKey', 'boardConfPct', 'boardAnalysisOf', 'boardResultSummaryOf',
+  'boardPickFromRecord', 'boardChooseDate', 'boardBandRates', 'boardRankDay',
+  'boardVisiblePicks', 'buildLandingBoard'];
 const code = names.map(extractFn).join('\n');
 eval('var LANDING_HTML = ' + JSON.stringify(EMBEDDED_HTML) + ';\n' + code +
-  '\n;global.__x = { isParlayLandingHost, landingHtmlForHost, buildLandingPayload, landingAddDays };');
+  '\n;global.__x = { isParlayLandingHost, landingHtmlForHost, buildLandingPayload, landingAddDays, buildLandingBoard };');
 const X = global.__x;
 
 // --- host gate ---
@@ -66,7 +69,9 @@ const served = X.landingHtmlForHost();
 check('served page carries the bell', served.indexOf('id="bellbtn"') !== -1);
 check('served page bell reads real alert endpoints', served.indexOf('/api/alerts/history') !== -1 && served.indexOf('/api/alerts/pending') !== -1);
 check('served page has no sample notifications', served.indexOf('sample notifications') === -1);
-check('served Sign In stays same-host into the board', served.indexOf('href="/login?redirect=%2Fboard"') !== -1);
+check('served Sign In stays same-host and returns to the landing page', served.indexOf('href="/login?redirect=%2F"') !== -1);
+check('served page navigation has no Todays Board item', served.indexOf('<a href="#picks">Today\'s Board</a>') === -1);
+check('served page unlocks the board in place via the gated route', served.indexOf('/api/landing-board') !== -1);
 check('served page has no ai.grimaldi.tv login link', served.indexOf('https://ai.grimaldi.tv/login') === -1);
 check('served page room links stay same-host via the handoff', served.indexOf('href="/sso/handoff?to=') !== -1);
 check('served page shows performance day by day', served.indexOf('day by day') !== -1 && served.indexOf('daily-list') !== -1);
@@ -105,8 +110,18 @@ check('daily shows yesterday at 50%', p.daily.some((d) => d.date === yday && d.w
 const empty = X.buildLandingPayload([]);
 check('empty book payload is ok with an empty board', empty.ok === true && empty.boardCount === 0 && empty.boardDate === '' && empty.freePicks.length === 0);
 
+// --- in-place unlock through the board gate ---
+const full = X.buildLandingBoard(records, true);
+check('unlock: premium sees every pick in place', full.ok === true && full.date === today && full.picks.length === 5 && full.locked.length === 0);
+check('unlock: premium picks carry winner + confidence', full.picks.every((p) => typeof p.pick === 'string' && p.pick.length > 0 && typeof p.confidence === 'number'));
+const free = X.buildLandingBoard(records, false);
+check('unlock: free member gets the free three plus locked rows', free.picks.length === 3 && free.locked.length === 2);
+check('unlock: free locked rows carry league + matchup ONLY', free.locked.every((s) => Object.keys(s).sort().join(',') === 'league,matchup'));
+check('unlock: empty book stays empty', X.buildLandingBoard([], true).picks.length === 0);
+
 // --- route wiring present in the handler ---
 check('/api/landing-data route is wired', src.indexOf('url.pathname === "/api/landing-data"') !== -1);
+check('/api/landing-board route is wired', src.indexOf('url.pathname === "/api/landing-board"') !== -1);
 check('root branch serves the landing page on parlay hosts', src.indexOf('isParlayLandingHost(url.hostname)') !== -1 && src.indexOf('landingHtmlForHost()') !== -1);
 
 console.log(`landing-root: ${passed} passed, ${failed} failed`);
