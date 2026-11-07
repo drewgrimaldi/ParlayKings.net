@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-06 9:12 PM ET",
+    notes: `THE WORKFLOW SCREEN IS ADMIN-ONLY. The public no longer sees it: the Workflow links in the app menus and footer now appear only for the admin account, the page itself sends everyone else back to the home page, and it is out of the sitemap. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-06 9:08 PM ET",
     notes: `RECENT PERFORMANCE IS PREVIOUS DAYS ONLY. The card no longer blends the last 30 days or the season into a headline number. The three tiles now show the latest completed day (win rate, record, graded picks), the chart and the day rows cover previous days only, and today joins the list once the day is final. The header also fits narrower windows: the nav shrinks a step at 1120px and the sandwich menu takes over below 1000px, so nothing clips. Model stays 1.7.2.`
   },
@@ -1851,7 +1856,7 @@ function samNetworkNavHtml({ signedIn, isAdmin, current, hostname } = {}) {
     ${grimUnderTrivia}
     <div class="nav-section-title">PARLAY KINGS</div>
     <a class="nav-link${on("/stats")}" href="/stats">Stats</a>
-    ${parlayHost ? "" : `<a class="nav-link${on("/workflow")}" href="/workflow">Workflow</a>`}
+    ${!parlayHost && isAdmin ? `<a class="nav-link${on("/workflow")}" href="/workflow">Workflow</a>` : ""}
     <a class="nav-link${on("/about")}" href="/about">About</a>
     <a class="nav-link${on("/changelog")}" href="/changelog">Version Notes</a>
     ${runToday}
@@ -20803,7 +20808,7 @@ Sitemap: https://parlaykings.net/sitemap.xml
     }
     if (url.pathname === "/sitemap.xml") {
       const today = todayET();
-      const urls = ["/", "/about", "/workflow", "/stats", "/changelog", "/nfl", "/nba", "/mlb", "/ufc", "/tennis", "/wnba", "/ncaaf"];
+      const urls = ["/", "/about", "/stats", "/changelog", "/nfl", "/nba", "/mlb", "/ufc", "/tennis", "/wnba", "/ncaaf"];
       const body = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.map((p) => `  <url><loc>https://parlaykings.net${p === "/" ? "/" : p}</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>${p === "/" ? "1.0" : "0.8"}</priority></url>`).join("\n")}
@@ -22712,6 +22717,9 @@ ${samNetworkNavHtml({ signedIn: !!session, isAdmin: isSlateAdmin(session), curre
       });
     }
     if (url.pathname === "/workflow") {
+      if (!isSlateAdmin(session)) {
+        return new Response(null, { status: 302, headers: { Location: "/" } });
+      }
       return new Response(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -23505,7 +23513,7 @@ ${shareMetaTags()}
     ${grimUnderTrivia}
     <div class="nav-section-title">PARLAY KINGS</div>
     <a class="nav-link" href="/stats">Stats</a>
-    ${parlayHost ? "" : `<a class="nav-link" href="/workflow">Workflow</a>`}
+    ${!parlayHost && isSlateAdmin(session) ? `<a class="nav-link" href="/workflow">Workflow</a>` : ""}
     <a class="nav-link" href="/about">About</a>
     <a class="nav-link" href="/changelog">Version Notes</a>
     ${!parlayHost && isSlateAdmin(session) ? `<a class="nav-link" href="#" onclick="runTodaySlate(); closeNavMenu(); return false;">Run Today</a>` : ""}
@@ -23569,7 +23577,7 @@ ${sportsbookDrawerHtml()}
   <div class="footer-links">
     <a href="/about">About</a>
     <a href="/stats">Stats</a>
-    ${parlayHost ? "" : `<a href="/workflow">Workflow</a>`}
+    ${!parlayHost && isSlateAdmin(session) ? `<a href="/workflow">Workflow</a>` : ""}
     <a href="/changelog">Version Notes</a>
     <a href="https://grimaldi.tv" target="_blank" rel="noopener">GRIMALDI.TV</a>
     <a href="/login">Login</a>
