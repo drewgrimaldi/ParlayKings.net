@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-06 7:08 PM ET",
+    notes: `MEMBER BOARD IS LIVE. The daily board now has its own page at /board: sign in and the day's full slate is there — every pick, every confidence, and the analysis, with results as games settle. Premium is enforced on the server: free accounts see their three showcase picks in full and the rest of the board as league-and-matchup placeholders only, so premium picks, confidences, and analysis never enter a free response. Signed-in members on the ParlayKings hosts land on the board; the slate admin is excluded from that redirect and checkout returns are never redirected. Every board card links to its league's sports room, and the board can be filtered to one league (/board?league=NBA) with the access gate applied before the filter. Tests: tests/board.test.js (44 checks); full suite green. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-06 7:46 AM ET",
     notes: `TEAM-NAME GUARD ON MARKET SNAPSHOTS. A market line is now trusted only when the side it names against the pick is actually the other team in the matchup. On the morning of November 6 the fetched book line for Wagner vs Miami named Virginia Cavaliers as the other side — a different game's line, crossed at fetch time — and the market anchor moved the logged pick onto that phantom favorite at 98%; the model's own pick was Miami at 60%. Deleting the record and re-running reproduced the same wrong pick, because the crossing happens when the line is fetched, not when the record is written. The anchor gate and the shadow judge now run the same check: a snapshot whose named other side does not match the matchup's other team is ignored entirely, the sim's pick logs exactly as generated, and a dropped snapshot is recorded on the shadow verdict. Name forms still match the way they always have (full name, short form, or nickname). Untouched: the anchor bars, the dissent zone, calibration, grading. Tests: tests/team-name-guard.test.js (21 checks); full suite green. Model stays 1.7.2.`
   },
@@ -1687,7 +1692,7 @@ function samNetworkNavHtml({ signedIn, isAdmin, current, hostname } = {}) {
   const podcastLinks = parlayHost ? "" : `<a class="nav-link" href="https://grimaldi.tv/">HOME</a>
     <a class="nav-link" href="https://grimaldi.tv/Episodes">EPISODES</a>`;
   const grimUnderTrivia = `<a class="nav-link" href="https://grimaldi.tv/">GRIMALDI.TV</a>`;
-  const analyzerLabel = parlayHost ? "\u2B50 ParlayKings.net" : "\u2B50 LAUNCH SPORTS ANALYZER";
+  const analyzerLabel = parlayHost ? "\u2B50 Ask SAM" : "\u2B50 LAUNCH SPORTS ANALYZER";
   return `<button class="nav-toggle" type="button" onclick="toggleNavMenu(event)" aria-label="Menu"><span></span><span></span><span></span></button>
 <div class="nav-overlay" id="nav-overlay" onclick="closeNavMenu()"></div>
 <div class="nav-drawer" id="nav-drawer">
@@ -1699,6 +1704,7 @@ function samNetworkNavHtml({ signedIn, isAdmin, current, hostname } = {}) {
     ${podcastLinks ? `<div class="nav-section-title">THE DREW GRIMALDI PODCAST</div>
     ${podcastLinks}` : ""}
     <div class="nav-section-title">SPORTS</div>
+    <a class="nav-link${on("/board")}" href="/board">Today's Board</a>
     <a class="nav-link${on("/")}" href="/">${analyzerLabel}</a>
     <a class="nav-link" href="/sso/handoff?to=https://football.grimaldi.tv/">FOOTBALL (NCAAF/NFL)</a>
     <a class="nav-link" href="/sso/handoff?to=https://mlb.grimaldi.tv/">BASEBALL (MLB)</a>
@@ -17027,6 +17033,334 @@ __name22222222(consumeSsoHandoffToken, "consumeSsoHandoffToken");
 __name222222222(consumeSsoHandoffToken, "consumeSsoHandoffToken");
 __name2222222222(consumeSsoHandoffToken, "consumeSsoHandoffToken");
 __name22222222222(consumeSsoHandoffToken, "consumeSsoHandoffToken");
+// ===== Phase 3: the member board (/board) =====
+// The daily analyzed board is the club's core product; until now it
+// existed only as logged data — members landed in the chat. /board
+// serves the board from the existing bets replica.
+//
+// Premium enforcement is SERVER-SIDE by construction: the only
+// function that turns a logged pick into page data is
+// boardVisiblePicks(), and for a free member it returns full data for
+// the free three only — every other game is reduced to
+// { league, matchup } BEFORE any HTML exists. Premium picks,
+// confidences, and analysis text never enter a free member's response.
+function boardConfPct(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n <= 1 ? Math.round(n * 100) : Math.round(n);
+}
+function boardResultSummaryOf(notes) {
+  // The graded tail of the stored Notes: "... · Result: Final: X 31,
+  // Y 30. Pick: X (77%) — Win." Take the LAST Result segment and cut
+  // any trailing marker blocks.
+  const n = String(notes || "");
+  const i = n.lastIndexOf(" · Result:");
+  if (i === -1) return "";
+  let s = n.slice(i + " · Result:".length).trim();
+  s = s.split(/---ODDSLINE---|---POLYLINE---|---ANCHOR---|---AIRTABLE---|---SHADOWGUARD---/)[0].trim();
+  return s.slice(0, 300);
+}
+function boardAnalysisOf(notes) {
+  // The model's stored write-up. Current records carry it after a
+  // ---FULLREPLY--- marker behind an "Auto-logged ... Q: ..." prefix;
+  // older records use the "Full reply:" shape /api/league-picks reads.
+  const n = String(notes || "").trim();
+  if (!n) return "";
+  let s = n;
+  const fr = s.indexOf("---FULLREPLY---");
+  if (fr !== -1) {
+    s = s.slice(fr + "---FULLREPLY---".length);
+  } else {
+    s = s.slice(s.lastIndexOf("]") + 1);
+    s = s.slice(s.lastIndexOf("Analysis only - not betting advice.") + 30);
+    s = s.slice(s.indexOf("Full reply:") + 11);
+    s = s.split(/\bReply:\s*\[[A-Z]/)[0];
+  }
+  s = s.split(/---ODDSLINE---|---POLYLINE---|---ANCHOR---|---AIRTABLE---|---SHADOWGUARD---|\[BACKTEST ONLY|\[LEAN ONLY/)[0];
+  const pred = s.split(" · Result:")[0]?.trim() || "";
+  return pred.replace(/^\[(LEAN ONLY|BACKTEST ONLY) — [^\]]*\]\s*/i, "").slice(0, 4000);
+}
+function boardPickFromRecord(r) {
+  const f = (r && r.fields) || {};
+  return {
+    league: String(f["League"] || ""),
+    matchup: String(f["Bet Label"] || ""),
+    pick: String(f["Picked Winner"] || ""),
+    confidence: boardConfPct(f["Confidence %"]),
+    result: String(f["Result"] || "Pending"),
+    analysis: boardAnalysisOf(f["Notes"]),
+    resultSummary: boardResultSummaryOf(f["Notes"])
+  };
+}
+function boardDateKey(f) {
+  const d = String((f && f["Event Date"]) || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : "";
+}
+function boardLongLabel(iso) {
+  if (!iso) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", weekday: "long", month: "long", day: "numeric", year: "numeric"
+  }).format(new Date(iso + "T12:00:00Z"));
+}
+// Which date's board to show: today's when picks are logged for it,
+// otherwise the most recent earlier date with picks ("" when the book
+// is empty). Mirrors the landing page's empty-board behavior.
+function boardChooseDate(datesDesc, today) {
+  if (!datesDesc || !datesDesc.length) return "";
+  if (datesDesc.includes(today)) return today;
+  for (const d of datesDesc) if (d < today) return d;
+  return "";
+}
+// Confidence-band trailing performance, the free-pick ranking input —
+// same rule the landing page states publicly: bands from the trailing
+// 30 days of graded picks; thin bands fall back to the overall rate.
+function boardBandRates(records, today) {
+  const since = new Date(new Date(today + "T12:00:00Z").getTime() - 30 * 864e5).toISOString().slice(0, 10);
+  const bands = new Map();
+  let ow = 0, ol = 0;
+  for (const r of records || []) {
+    const f = (r && r.fields) || {};
+    const ed = boardDateKey(f);
+    if (!ed || ed < since || ed > today) continue;
+    const res = String(f["Result"] || "");
+    if (res !== "Win" && res !== "Loss") continue;
+    const c = boardConfPct(f["Confidence %"]);
+    const band = c == null ? -1 : Math.min(90, Math.floor(c / 10) * 10);
+    const b = bands.get(band) || { w: 0, l: 0 };
+    if (res === "Win") { b.w++; ow++; } else { b.l++; ol++; }
+    bands.set(band, b);
+  }
+  const overall = ow + ol > 0 ? ow / (ow + ol) : 0;
+  return { bands, overall };
+}
+function boardRankDay(picks, bandRates) {
+  const rate = (c) => {
+    if (c == null) return bandRates.overall;
+    const b = bandRates.bands.get(Math.min(90, Math.floor(c / 10) * 10));
+    return b && b.w + b.l >= 20 ? b.w / (b.w + b.l) : bandRates.overall;
+  };
+  return (picks || []).slice().sort((a, b2) => {
+    const d = rate(b2.confidence) - rate(a.confidence);
+    if (d !== 0) return d;
+    return (b2.confidence || 0) - (a.confidence || 0);
+  });
+}
+// Sports rooms: each league's room in the club. Board games link back
+// to their room, and rooms link to the board's view for their leagues.
+// The room is reached through the SSO handoff so the member's sign-in
+// and access carry across hosts.
+function boardRoomForLeague(league) {
+  const L = String(league || "").toUpperCase();
+  if (L === "NFL" || L === "NCAAF") return { name: "Football", url: "https://football.grimaldi.tv/" };
+  if (L === "MLB") return { name: "Baseball", url: "https://mlb.grimaldi.tv/" };
+  if (L === "NBA" || L === "NCAAB") return { name: "Basketball", url: "https://basketball.grimaldi.tv/" };
+  if (L === "WNBA") return { name: "WNBA", url: "https://wnba.grimaldi.tv/" };
+  if (L === "UFC") return { name: "UFC / MMA", url: "https://ufc.grimaldi.tv/" };
+  if (L === "NHL") return { name: "NHL", url: "https://nhl.grimaldi.tv/" };
+  if (L === "TENNIS" || L === "ATP" || L === "WTA") return { name: "Tennis", url: "https://tennis.grimaldi.tv/" };
+  return null;
+}
+function boardRoomHref(league) {
+  const room = boardRoomForLeague(league);
+  return room ? `/sso/handoff?to=${encodeURIComponent(room.url)}` : "";
+}
+// League filter for the board's per-room views. Applied AFTER
+// boardVisiblePicks: the access gate decides what a member may see,
+// the filter only narrows that already-gated list — a free member who
+// filters by league still sees at most their free three in full.
+function boardFilterByLeague(visible, locked, league) {
+  const want = String(league || "").trim().toUpperCase();
+  if (!want) return { visible, locked };
+  const hit = (p) => String(p.league || "").toUpperCase() === want;
+  return { visible: (visible || []).filter(hit), locked: (locked || []).filter(hit) };
+}
+// THE access gate. fullAccess → every pick in full. Otherwise the free
+// three in full (the same band-ranked selection the landing page shows
+// publicly) and league+matchup-only placeholders for the rest.
+function boardVisiblePicks(dayPicks, fullAccess, bandRates) {
+  const ranked = boardRankDay(dayPicks, bandRates);
+  if (fullAccess) return { visible: ranked, locked: [] };
+  return {
+    visible: ranked.slice(0, 3),
+    locked: ranked.slice(3).map((p) => ({ league: p.league, matchup: p.matchup }))
+  };
+}
+function boardSeasonRecord(records) {
+  const rec = { wins: 0, losses: 0, pushes: 0, pending: 0, total: 0 };
+  for (const r of records || []) {
+    const res = String(((r && r.fields) || {})["Result"] || "Pending");
+    rec.total++;
+    if (res === "Win") rec.wins++;
+    else if (res === "Loss") rec.losses++;
+    else if (res === "Push") rec.pushes++;
+    else rec.pending++;
+  }
+  rec.decided = rec.wins + rec.losses;
+  rec.winRate = rec.decided > 0 ? Math.round(rec.wins / rec.decided * 1000) / 10 : null;
+  return rec;
+}
+function boardRenderHtml(opts) {
+  const esc = escapeHtml;
+  const boardLabel = opts.boardDate ? boardLongLabel(opts.boardDate) : "";
+  const rec = opts.record;
+  const recLine = rec && rec.decided > 0
+    ? `Season record: ${rec.wins}W\u2013${rec.losses}L${rec.pushes ? `\u2013${rec.pushes}P` : ""} (${rec.winRate}% on decided) \u00B7 <a href="/stats">Full record</a>`
+    : `The full graded record lives on the <a href="/stats">Stats page</a>.`;
+  const badge = (result) => {
+    const r = String(result || "Pending");
+    const cls = r === "Win" ? "win" : r === "Loss" ? "loss" : r === "Push" ? "push" : "pend";
+    return `<span class="badge ${cls}">${esc(r)}</span>`;
+  };
+  const roomLine = (p) => {
+    const room = boardRoomForLeague(p.league);
+    return room ? `<div class="roomlink"><a href="${boardRoomHref(p.league)}">${esc(room.name)} room</a></div>` : "";
+  };
+  const card = (p) => `
+      <article class="bcard">
+        <div class="btop"><span class="league">${esc(p.league)}</span>${badge(p.result)}</div>
+        <div class="matchup">${esc(p.matchup)}</div>
+        <div class="pickrow"><span class="pick">${esc(p.pick)}</span>${p.confidence != null ? `<span class="conf">${p.confidence}%</span>` : ""}</div>
+        ${p.resultSummary ? `<p class="analysis">${esc(p.resultSummary)}</p>` : (p.analysis ? `<p class="analysis">${esc(p.analysis)}</p>` : "")}
+        ${roomLine(p)}
+      </article>`;
+  const lockedCard = (p) => `
+      <article class="bcard locked">
+        <div class="btop"><span class="league">${esc(p.league)}</span><span class="locktag">Premium</span></div>
+        <div class="matchup">${esc(p.matchup)}</div>
+        <div class="lockmsg">Pick, confidence, and full analysis are Premium. <a href="/buy?tier=premium">Go Premium</a></div>
+        ${roomLine(p)}
+      </article>`;
+  let notice = "";
+  let cards = "";
+  if (opts.unavailable) {
+    notice = `<div class="notice">The board is temporarily unavailable. No picks are shown rather than stale or invented ones \u2014 check back shortly.</div>`;
+  } else if (!opts.boardDate) {
+    notice = `<div class="notice">No board has posted yet. When the morning run logs today's games, the full board appears here.</div>`;
+  } else {
+    if (!opts.boardIsToday) {
+      notice = `<div class="notice">Today's board hasn't posted yet \u2014 showing the most recent board, from ${esc(boardLabel)}.</div>`;
+    }
+    cards = opts.visible.map(card).join("") + opts.locked.map(lockedCard).join("");
+    if (!opts.fullAccess && opts.locked.length) {
+      cards += `<div class="upsell">You're seeing the board's free three. Premium members get the full board \u2014 every game, every pick, full analysis. <a href="/buy?tier=premium">Premium \u2014 $25 / month</a></div>`;
+    }
+    if (opts.leagueFilter && !opts.visible.length && !opts.locked.length) {
+      cards = `<div class="notice">No ${esc(opts.leagueFilter)} games on this board.</div>`;
+    }
+  }
+  let leagueChips = "";
+  if (opts.boardDate && Array.isArray(opts.leagues) && opts.leagues.length > 1) {
+    const chip = (label, href, on) => `<a class="chip${on ? " on" : ""}" href="${href}">${esc(label)}</a>`;
+    leagueChips = `<div class="chips">${chip("All leagues", "/board", !opts.leagueFilter)}${opts.leagues.map((lg) => chip(lg, `/board?league=${encodeURIComponent(lg)}`, String(opts.leagueFilter || "").toUpperCase() === String(lg).toUpperCase())).join("")}</div>`;
+  }
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Today's Board | Parlay Kings</title>
+<style>${samNetworkNavCss()}
+body{background:#14061F;color:#F5F5F5;font-family:'Inter',sans-serif;margin:0}
+.wrap{max-width:860px;margin:0 auto;padding:28px 18px 60px}
+h1{font-family:'Bebas Neue',sans-serif;font-size:34px;letter-spacing:.04em;margin:10px 0 2px}
+h1 .g{color:#E0B84C}
+.sub{color:#A8ACB6;font-size:14px;margin:0 0 18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.bcard{background:#1A082C;border:1px solid rgba(212,175,55,.28);border-radius:12px;padding:16px}
+.bcard.locked{opacity:.85}
+.btop{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.league{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;color:#E0B84C;text-transform:uppercase}
+.badge{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.08em;padding:3px 8px;border-radius:20px;text-transform:uppercase}
+.badge.win{background:rgba(16,185,129,.18);color:#10B981}.badge.loss{background:rgba(239,68,68,.16);color:#EF4444}
+.badge.push{background:rgba(245,158,11,.16);color:#F59E0B}.badge.pend{background:rgba(59,130,246,.16);color:#7EC8E3}
+.locktag{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.08em;color:#1A082C;background:linear-gradient(135deg,#F4D03F,#D4AF37);padding:3px 8px;border-radius:20px;text-transform:uppercase}
+.matchup{font-size:16px;font-weight:600;line-height:1.35;margin-bottom:8px}
+.pickrow{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.pick{font-size:15px;font-weight:700;color:#F4D03F}
+.conf{font-family:'JetBrains Mono',monospace;font-size:13px;color:#A8ACB6}
+.analysis{font-size:13px;line-height:1.6;color:#d8dce3;margin:0 0 10px;white-space:pre-wrap}
+.lockmsg{font-size:13px;line-height:1.6;color:#A8ACB6}
+.lockmsg a,.upsell a,.record a{color:#E0B84C}
+.notice{background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.35);border-radius:10px;padding:14px 16px;font-size:14px;line-height:1.6;margin-bottom:16px}
+.upsell{grid-column:1/-1;background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.35);border-radius:10px;padding:14px 16px;font-size:14px;line-height:1.6}
+.record{margin-top:26px;font-size:13px;color:#A8ACB6}
+.who{font-size:12px;color:#8a8f98;margin-top:6px}
+.roomlink{margin-top:2px}
+.roomlink a{color:#E0B84C;font-size:12.5px;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.chip{font-size:12.5px;font-weight:600;color:#d8dce3;border:1px solid rgba(212,175,55,.35);border-radius:20px;padding:5px 12px;text-decoration:none}
+.chip.on{background:linear-gradient(135deg,#F4D03F,#D4AF37);color:#1A082C;border-color:transparent}
+</style>
+</head>
+<body>
+${samNetworkNavHtml({ signedIn: true, isAdmin: opts.isAdmin, current: "/board", hostname: opts.hostname })}
+<div class="wrap">
+  <h1>Today's <span class="g">Board</span></h1>
+  <p class="sub">${opts.boardDate ? esc(boardLabel) + " \u2014 every game on the board, analyzed and logged." : "The daily analyzed board."}</p>
+  ${notice}
+  ${leagueChips}
+  <div class="grid">${cards}</div>
+  <div class="record">${recLine}</div>
+  <div class="who">Signed in as ${esc(opts.username)}${opts.fullAccess ? " \u2014 Premium: full board unlocked." : " \u2014 Free: today's top three unlocked."}</div>
+</div>
+</body>
+</html>`;
+}
+async function handleBoardPage(request, env, session, url) {
+  if (!session) {
+    return new Response(null, { status: 302, headers: { Location: `/login?redirect=${encodeURIComponent(url.pathname + url.search)}` } });
+  }
+  const bettor = session.bettorRecordId ? await getBettorRecord(env, session.bettorRecordId) : null;
+  const fullAccess = hasSportsSiteAccess(bettor);
+  const records = await loadBetsReplica(env);
+  const base = {
+    hostname: url.hostname,
+    username: session.username || "",
+    isAdmin: isSlateAdmin(session),
+    fullAccess
+  };
+  if (!Array.isArray(records)) {
+    return new Response(boardRenderHtml({ ...base, unavailable: true, boardDate: "", boardIsToday: false, visible: [], locked: [], record: null }), {
+      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
+    });
+  }
+  const today = todayET();
+  const byDate = new Map();
+  for (const r of records) {
+    const ed = boardDateKey((r && r.fields) || {});
+    if (!ed || ed > today) continue;
+    const arr = byDate.get(ed) || [];
+    arr.push(boardPickFromRecord(r));
+    byDate.set(ed, arr);
+  }
+  const boardDate = boardChooseDate([...byDate.keys()].sort().reverse(), today);
+  const bandRates = boardBandRates(records, today);
+  const dayPicks = boardDate ? byDate.get(boardDate) || [] : [];
+  const gated = boardDate
+    ? boardVisiblePicks(dayPicks, fullAccess, bandRates)
+    : { visible: [], locked: [] };
+  // League views (?league=NBA) narrow the ALREADY-GATED lists — the
+  // filter runs after boardVisiblePicks, never before it.
+  const leagueParam = (url.searchParams.get("league") || "").trim();
+  const dayLeagues = [...new Set(dayPicks.map((p) => String(p.league || "")).filter(Boolean))];
+  const leagueFilter = leagueParam && dayLeagues.some((lg) => lg.toUpperCase() === leagueParam.toUpperCase())
+    ? dayLeagues.find((lg) => lg.toUpperCase() === leagueParam.toUpperCase())
+    : "";
+  const { visible, locked } = boardFilterByLeague(gated.visible, gated.locked, leagueFilter);
+  return new Response(boardRenderHtml({
+    ...base,
+    boardDate,
+    boardIsToday: boardDate === today,
+    visible,
+    locked,
+    leagues: dayLeagues,
+    leagueFilter,
+    record: boardSeasonRecord(records)
+  }), {
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
+  });
+}
+
 async function getSession(request, env) {
   if (!env.SESSION_SECRET) return null;
   const token = getCookie(request, SESSION_COOKIE_NAME);
@@ -22226,6 +22560,9 @@ ${samNetworkNavHtml({ signedIn: !!session, isAdmin: isSlateAdmin(session), curre
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" }
       });
     }
+    if (url.pathname === "/board" && request.method === "GET") {
+      return handleBoardPage(request, env, session, url);
+    }
     if (url.pathname === "/stats") {
       if (!session) {
         return new Response(null, { status: 302, headers: { Location: `/login?redirect=${encodeURIComponent(url.pathname + url.search)}` } });
@@ -22750,6 +23087,15 @@ ${samNetworkNavHtml({ signedIn: !!session, isAdmin: isSlateAdmin(session), curre
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" }
       });
     }
+    // Phase 3: on ParlayKings hosts a signed-in member's front door is
+    // the board, not the chat. The slate admin keeps the chat/runner
+    // home (the morning run-all drives it), and a Stripe return never
+    // redirects.
+    const rootHost = String(url.hostname || "").toLowerCase();
+    const rootIsParlay = rootHost === "parlaykings.net" || rootHost.endsWith(".parlaykings.net") || rootHost === "parlaykings.app" || rootHost.endsWith(".parlaykings.app");
+    if (url.pathname === "/" && request.method === "GET" && session && !isSlateAdmin(session) && rootIsParlay && !url.searchParams.has("purchase")) {
+      return new Response(null, { status: 302, headers: { Location: "/board" } });
+    }
     const paidSessionId = url.searchParams.get("session_id");
     if (url.searchParams.get("purchase") === "success" && paidSessionId) {
       await fulfillStripeCheckoutSession(env, paidSessionId);
@@ -22762,7 +23108,7 @@ ${samNetworkNavHtml({ signedIn: !!session, isAdmin: isSlateAdmin(session), curre
     const chatPodcastLinks = parlayHost ? "" : `<a class="nav-link" href="https://grimaldi.tv/">HOME</a>
     <a class="nav-link" href="https://grimaldi.tv/Episodes">EPISODES</a>`;
     const grimUnderTrivia = `<a class="nav-link" href="https://grimaldi.tv/">GRIMALDI.TV</a>`;
-    const chatAnalyzerLabel = parlayHost ? "\u2B50 ParlayKings.net" : "\u2B50 LAUNCH SPORTS ANALYZER";
+    const chatAnalyzerLabel = parlayHost ? "\u2B50 Ask SAM" : "\u2B50 LAUNCH SPORTS ANALYZER";
     return new Response(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -22807,6 +23153,7 @@ ${shareMetaTags()}
     ${chatPodcastLinks ? `<div class="nav-section-title">THE DREW GRIMALDI PODCAST</div>
     ${chatPodcastLinks}` : ""}
     <div class="nav-section-title">SPORTS</div>
+    <a class="nav-link" href="/board">Today's Board</a>
     <a class="nav-link active-channel" href="/">${chatAnalyzerLabel}</a>
     <a class="nav-link" href="/sso/handoff?to=https://football.grimaldi.tv/">FOOTBALL (NCAAF/NFL)</a>
     <a class="nav-link" href="/sso/handoff?to=https://mlb.grimaldi.tv/">BASEBALL (MLB)</a>
@@ -22935,6 +23282,7 @@ ${sportsbookDrawerHtml()}
     if (purchase) {
       window.history.replaceState({}, '', window.location.pathname);
     }
+
 
     const input = document.getElementById('input');
     if (input) input.focus();
