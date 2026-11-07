@@ -140,9 +140,9 @@ check('member default: redirect excludes slate admin', src.includes('!isSlateAdm
 check('member default: Stripe returns never redirect', src.includes('!url.searchParams.has("purchase")'));
 check('no per-prediction Ask SAM links anywhere (removed at Drew\'s order)', !src.includes('Ask SAM about this game') && !src.includes('boardAskHref') && !src.includes("params.get('ask')"));
 const navShared = src.slice(src.indexOf('function samNetworkNavHtml'), src.indexOf('__name(samNetworkNavHtml'));
-check('shared nav: Today\'s Board before Ask SAM', navShared.indexOf("Today's Board") > -1 && navShared.indexOf("Today's Board") < navShared.indexOf('analyzerLabel}</a>'));
+check('shared nav: no Todays Board item (retired with /board)', navShared.indexOf("Today's Board") === -1 && !navShared.includes('href="/board"'));
 const chatNav = src.slice(src.indexOf('const chatPodcastLinks'), src.indexOf('${sportsbookDrawerHtml()}'));
-check('chat nav: Today\'s Board present', chatNav.includes('href="/board">Today\'s Board</a>'));
+check('chat nav: no Todays Board item (retired with /board)', !chatNav.includes('href="/board">Today\'s Board</a>'));
 
 console.log(`board tests: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

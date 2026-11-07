@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-06 7:49 PM ET",
+    notes: `TODAY'S BOARD REMOVED FROM THE APP MENUS. The Today's Board item is out of both app drawers (the shared network nav and the chat nav). It pointed at the retired /board page; the board lives on the parlaykings.net landing page now, and the label is gone everywhere it was added. Everything else in the menus is untouched. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-06 7:45 PM ET",
     notes: `SSO AUTO-BOUNCE REMOVED FROM THE LANDING PAGE. The front door no longer hops to ai.grimaldi.tv on arrival to hunt for a session. That bounce carried the slate admin's own sign-in onto parlaykings.net, where the root serves the admin the app home — so the owner stopped seeing his own landing page. The page now behaves as it did before the bounce: signed-out visitors see the public page, and a member who signs in through the Sign In button returns to the landing page with the board unlocked in place. Cross-site sign-in carry-over still works through the app's own handoff links, as before. Model stays 1.7.2.`
   },
@@ -1729,7 +1734,6 @@ function samNetworkNavHtml({ signedIn, isAdmin, current, hostname } = {}) {
     ${podcastLinks ? `<div class="nav-section-title">THE DREW GRIMALDI PODCAST</div>
     ${podcastLinks}` : ""}
     <div class="nav-section-title">SPORTS</div>
-    <a class="nav-link${on("/board")}" href="/board">Today's Board</a>
     <a class="nav-link${on("/")}" href="/">${analyzerLabel}</a>
     <a class="nav-link" href="/sso/handoff?to=https://football.grimaldi.tv/">FOOTBALL (NCAAF/NFL)</a>
     <a class="nav-link" href="/sso/handoff?to=https://mlb.grimaldi.tv/">BASEBALL (MLB)</a>
@@ -23371,7 +23375,6 @@ ${shareMetaTags()}
     ${chatPodcastLinks ? `<div class="nav-section-title">THE DREW GRIMALDI PODCAST</div>
     ${chatPodcastLinks}` : ""}
     <div class="nav-section-title">SPORTS</div>
-    <a class="nav-link" href="/board">Today's Board</a>
     <a class="nav-link active-channel" href="/">${chatAnalyzerLabel}</a>
     <a class="nav-link" href="/sso/handoff?to=https://football.grimaldi.tv/">FOOTBALL (NCAAF/NFL)</a>
     <a class="nav-link" href="/sso/handoff?to=https://mlb.grimaldi.tv/">BASEBALL (MLB)</a>
