@@ -95,7 +95,9 @@ function eq(a, b, msg) {
   eq(he.body, 'Padres vs Rockies · Predicted winner: San Diego Padres -167 (DraftKings)', 'high-edge body names the predicted winner in full');
   eq(he.short.includes('San Diego Padres') && he.short.includes('78%'), true, 'high-edge carries a compact bundle line');
   const heNoLine = buildHighEdgeAlert({ matchup: 'A vs B', winner: 'A', confidence: 60, league: 'X' }, null);
-  eq(heNoLine.body.includes('unavailable'), true, 'missing line degrades instead of crashing');
+  eq(heNoLine.body, 'A vs B · Predicted winner: A', 'missing line still names the predicted winner');
+  eq(heNoLine.body.includes('unavailable'), false, 'missing line never prints unavailable in place of the winner');
+  eq(heNoLine.short.includes('unavailable'), false, 'bundle line never prints unavailable either');
 
   const groups = groupRecapByLeague(
     [{ league: 'MLB', result: 'Win' }, { league: 'MLB', result: 'Loss' }, { league: 'NFL', result: 'Win' }, { league: '', result: 'Win' }],
@@ -167,6 +169,12 @@ function eq(a, b, msg) {
   eq(src.includes('ALERT_BUNDLE_TYPES[alert.type]'), true, 'dispatcher routes pick alerts into the bundle');
   eq(src.includes('await flushAlertBundles(env, kv);'), true, 'minutely alert pass flushes bundles');
   eq(src.includes('var ALERT_BUNDLE_WINDOW_MS = 5 * 60 * 1000'), true, 'bundle window is five minutes');
+  eq(src.includes('var ALERT_BUNDLE_TYPES = { lineMoves: true };'), true, 'pick alerts no longer bundle; line moves still do');
+  eq(src.includes('alert.type === "highEdge"'), true, 'dispatcher holds pick alerts at dispatch');
+  eq(src.includes('runPickHoldRelease'), true, 'alert pass releases held picks');
+  eq(src.includes('if (hour < 10) return;'), true, 'pick releases start at 10 AM ET');
+  eq(src.includes('var PICK_HOLD_BATCH = 12;'), true, 'pick releases batch twelve at a time');
+  eq(src.includes('pkJumpToAlertGame'), true, 'notification tap jumps to the game write-up');
 
   // Recap double-count: two provider targets resolving to the same base count once.
   globalThis.airtableProviderTargets = () => [{ baseId: 'same' }, { baseId: 'same' }];

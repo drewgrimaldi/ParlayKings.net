@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-09 11:05 AM ET",
+    notes: `PICK ALERTS ALWAYS NAME THE WINNER. When a pick's market line could not be read, the new-pick alert's body printed "Predicted winner: line unavailable" — the winner's name, the one thing the alert exists to say, was replaced by an error note. The alert now prints the predicted winner's name with or without a price: the price and book still follow when the line is known, and the name stands alone when it is not. The bundled short line carries the same fix. Nothing else moved: same alert, same moment, same dispatcher, and the prediction pipeline is untouched. Tests: tests/alerts.test.js. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-08 1:15 PM ET",
     notes: `FREE PLAN WORDING. The Ask SAM bullet on the Free plan card now reads "Ask SAM (Sports Analysis Machine 1.7.2)". Copy change only; the free plan itself is unchanged. Model stays 1.7.2.`
   },
@@ -19845,7 +19850,7 @@ function buildHighEdgeAlert(pick, line) {
   const confBit = Number.isFinite(conf) ? `${conf}%` : "pick";
   const lineBit = line && line.winnerPrice != null
     ? `${pick.winner} ${fmtLinePrice(line.winnerPrice)}${line.bookmakerTitle ? ` (${line.bookmakerTitle})` : ""}`
-    : "line unavailable";
+    : `${pick.winner}`;
   return {
     type: "highEdge",
     league: pick.league,
