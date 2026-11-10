@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-10 4:10 PM ET",
+    notes: `PRICING TIER: PREDICTIONS NOW RUN ON THE CONTRIBUTOR MODEL. The prediction path now calls muse-spark-1.3-contributor instead of muse-spark-1.3 — the same Muse Spark 1.3 model at the contributor rate ($0.10 per million input tokens, $0.20 output, against $1.25 / $4.25 on the standard tier). Reasoning effort stays high. The trade for the lower rate: prompts and completions on this tier may be used by Meta for product improvement and model training. Nothing else changed — same simulations, factors, calibration, anchor and gates. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-09 11:05 AM ET",
     notes: `PICK ALERTS ALWAYS NAME THE WINNER. When a pick's market line could not be read, the new-pick alert's body printed "Predicted winner: line unavailable" — the winner's name, the one thing the alert exists to say, was replaced by an error note. The alert now prints the predicted winner's name with or without a price: the price and book still follow when the line is known, and the name stands alone when it is not. The bundled short line carries the same fix. Nothing else moved: same alert, same moment, same dispatcher, and the prediction pipeline is untouched. Tests: tests/alerts.test.js. Model stays 1.7.2.`
   },
@@ -11538,7 +11543,7 @@ __name22222222(buildHistoryContext, "buildHistoryContext");
 __name222222222(buildHistoryContext, "buildHistoryContext");
 __name2222222222(buildHistoryContext, "buildHistoryContext");
 __name22222222222(buildHistoryContext, "buildHistoryContext");
-var SPARK_MODEL = "muse-spark-1.3";
+var SPARK_MODEL = "muse-spark-1.3-contributor";
 var SPARK_URL = "https://api.meta.ai/v1/chat/completions";
 var SPARK_REASONING_EFFORT = "high";
 function normalizeProvider(raw) {
