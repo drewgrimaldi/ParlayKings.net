@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-10 8:45 PM ET",
+    notes: `BACKGROUND PREDICTIONS: NO MORE DUPLICATES, NO MORE STUCK "THINKING". Follow-up to the 8:15 PM entry, from live use the same evening. (1) DUPLICATE ANSWERS: a finished prediction could be drawn twice — once from the saved chat when a notification tap opened it, and once by the page watcher racing it — and a prediction that finished while the app was closed could fail to surface on reopen at all because the reopen check keyed on a flag stamped when the message was sent, not when the answer was drawn. The render is now claimed once, up front, by whichever path gets there first; the tap path stands down when the watcher already drew the answer and just clears the thinking dots, and the reopen check keys on the drawn flag. (2) STUCK JOBS: the model's tool rounds had a round cap but no time budget, so a slow API could stretch one chat past six minutes and the job sat "running". Tool rounds now share a 150-second budget — past it, the model must answer from what it has, with no more tool calls — and the background runner aborts a wedged chat call at 285 seconds so the job always lands (done or failed) and its notification always goes out. (3) The push handler now re-reads the finished job up to three times before falling back to a generic notification, so a tap lands on the actual answer instead of the home page. Simulation, calibration, anchor and gates untouched. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-10 8:15 PM ET",
     notes: `BACKGROUND PREDICTIONS NOW ARRIVE WHEN YOU LEAVE. A signed-in member's message used to run inside the page unless a separate bell toggle was armed: leave the page or lose the connection mid-answer and the prediction died with it ("Error: Load failed"), and even armed background runs often sent no notification. Three breaks fixed. (1) Signed-in sends now run as background predictions by default — ask, close the page, and the answer is still produced, saved to the chat, and pushed on completion; guests still run in-page, and the bell still controls push. (2) The completion push no longer depends on the starting browser handing its subscription to the job — the runner also sends to the member's saved subscription (matched even when the sign-in name's capitalization differs between devices), so a job started somewhere with no push support still notifies the device that has it. (3) Reopening the app now surfaces a prediction that finished in an earlier visit instead of skipping it for belonging to a different chat, a still-running one is picked up and watched, and the push handler still shows a notification when the finished job cannot be read back in time. Simulation, calibration, anchor and gates untouched. Model stays 1.7.2.`
   },
@@ -11739,6 +11744,14 @@ async function callMeta(apiKey, message, env) {
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: message }
   ];
+  // Hard time budget across tool rounds (2026-11-10): the hop cap alone
+  // let a slow API stretch one chat past six minutes — seven rounds at
+  // up to ~120s each — so a background job sat "running" with the member
+  // staring at thinking dots. Past the budget, the next call goes out
+  // with no tools attached, which forces a final text answer from
+  // whatever the tools already returned.
+  const metaStartedAt = Date.now();
+  const META_BUDGET_MS = 150 * 1e3;
   const thoughts = [];
   let lastSim = null;
   let response = await requestMeta(apiKey, messages);
@@ -11767,10 +11780,11 @@ ${toolResult}`);
       }
       messages.push({ role: "tool", tool_call_id: call.id, content: toolResult });
     }
-    response = await requestMeta(apiKey, messages);
+    const overBudget = Date.now() - metaStartedAt > META_BUDGET_MS;
+    response = await requestMeta(apiKey, messages, overBudget);
     choice = response?.choices?.[0]?.message;
     if (choice?.reasoning_content) thoughts.push(choice.reasoning_content);
-    toolCalls = choice?.tool_calls || [];
+    toolCalls = overBudget ? [] : choice?.tool_calls || [];
   }
   return { response, thinkingText: finalizeThoughts(thoughts), lastSim };
 }
@@ -11786,7 +11800,7 @@ __name22222222(callMeta, "callMeta");
 __name222222222(callMeta, "callMeta");
 __name2222222222(callMeta, "callMeta");
 __name22222222222(callMeta, "callMeta");
-async function requestMeta(apiKey, messages) {
+async function requestMeta(apiKey, messages, noTools) {
   const TRANSIENT_STATUSES = [429, 502, 503, 504, 524];
   const attempt = /* @__PURE__ */ __name22222222222(async () => {
     const sparkResponse2 = await fetch(SPARK_URL, {
@@ -11798,7 +11812,7 @@ async function requestMeta(apiKey, messages) {
       body: JSON.stringify({
         model: SPARK_MODEL,
         messages,
-        tools: TOOLS_OPENAI,
+        ...noTools ? {} : { tools: TOOLS_OPENAI },
         reasoning_effort: SPARK_REASONING_EFFORT,
         temperature: 0.2,
         stream: false
@@ -20976,7 +20990,12 @@ async function runBgJob(env, ctx, kv, job, opts) {
     const res = await ai_worker_current_default.fetch(new Request("https://internal.local/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Cookie": job.cookie || "" },
-      body: JSON.stringify({ message: job.message, provider: job.provider, history: job.history || [] })
+      body: JSON.stringify({ message: job.message, provider: job.provider, history: job.history || [] }),
+      // A background job must always settle (2026-11-10): if the chat
+      // call wedges past 285s, abort it — the job lands as failed and
+      // the completion push still goes out, instead of the job sitting
+      // "running" until the sweeper's stale rescue.
+      signal: AbortSignal.timeout(285e3)
     }), env, ctx);
     try {
       data = await res.json();
@@ -21091,19 +21110,22 @@ var SW_JS = [
   "self.addEventListener('push', function(event) {",
   "  event.waitUntil((async function() {",
   "    var job = null;",
-  "    try {",
-  "      var res = await fetch('/api/jobs/mine', { credentials: 'same-origin' });",
-  "      if (res.ok) {",
-  "        var data = await res.json();",
-  "        var jobs = (data && data.jobs) || [];",
-  "        jobs.sort(function(a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });",
-  "        var nowMs = Date.now();",
-  "        for (var i = 0; i < jobs.length; i++) {",
-  "          var st = jobs[i].status;",
-  "          if ((st === 'done' || st === 'failed') && (nowMs - (jobs[i].doneAt || 0)) < 15 * 60 * 1000) { job = jobs[i]; break; }",
+  "    for (var attempt = 0; attempt < 3 && !job; attempt++) {",
+  "      if (attempt > 0) { try { await new Promise(function(r) { setTimeout(r, 2500); }); } catch (e) {} }",
+  "      try {",
+  "        var res = await fetch('/api/jobs/mine', { credentials: 'same-origin' });",
+  "        if (res.ok) {",
+  "          var data = await res.json();",
+  "          var jobs = (data && data.jobs) || [];",
+  "          jobs.sort(function(a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });",
+  "          var nowMs = Date.now();",
+  "          for (var i = 0; i < jobs.length; i++) {",
+  "            var st = jobs[i].status;",
+  "            if ((st === 'done' || st === 'failed') && (nowMs - (jobs[i].doneAt || 0)) < 15 * 60 * 1000) { job = jobs[i]; break; }",
+  "          }",
   "        }",
-  "      }",
-  "    } catch (e) {}",
+  "      } catch (e) {}",
+  "    }",
   "    try {",
   "      var cl = await clients.matchAll({ type: 'window', includeUncontrolled: true });",
   "      for (var k = 0; k < cl.length; k++) {",
@@ -24515,6 +24537,12 @@ ${sportsbookDrawerHtml()}
           if (!startedBgJobs[j.id] && !_startedLs) {
             startedBgJobs[j.id] = 1;
             try { localStorage.setItem("pk_started_" + j.id, "1"); } catch (e) {}
+            // Claim the render in the same synchronous pass (2026-11-10):
+            // resumeJob checks renderedBgJobs to decide whether a
+            // notification tap still needs to draw the answer, and
+            // setting it only after the typed render finished left a
+            // window where the tap path drew a second copy.
+            renderedBgJobs[j.id] = 1;
             dones.push(j);
           }
         }
@@ -25119,6 +25147,20 @@ ${sportsbookDrawerHtml()}
       if (j.status === "done" || j.status === "failed") {
         seenBgJobs[j.id] = 1;
         try { localStorage.setItem("pk_seen_" + j.id, "1"); } catch (e) {}
+        if (renderedBgJobs[j.id]) {
+          // Already drawn in this page by the watcher — the tap only
+          // needs the thinking dots gone, not a second copy of the
+          // answer (duplicate bubbles, 2026-11-10).
+          try { document.getElementById("thinking")?.remove(); } catch (e) {}
+          bgThinking = false;
+          return;
+        }
+        // Claim the render BEFORE the first await: the page watcher
+        // checks the same flag synchronously on its 4-second tick, and
+        // claiming after openConvo resolved left a window where the
+        // watcher and the saved-chat open both drew the answer.
+        startedBgJobs[j.id] = 1;
+        try { localStorage.setItem("pk_started_" + j.id, "1"); } catch (e) {}
         (async function() {
           // The finished turn is saved server-side before the push goes
           // out, so opening the saved chat is the reliable landing — try
@@ -25230,8 +25272,13 @@ ${sportsbookDrawerHtml()}
           // watcher picks them up.
           if (j.convoId && j.convoId !== convoId) {
             if (j.status === "done" || j.status === "failed") {
-              var _xSeenLs = null; try { _xSeenLs = localStorage.getItem("pk_seen_" + j.id); } catch (e) {}
-              if (!seenBgJobs[j.id] && !_xSeenLs && Date.now() - (j.doneAt || 0) < BG_FRESH_MS) { found = true; resumeJob(j.id); }
+              // Gate on STARTED, not seen: "seen" is stamped at enqueue
+              // time, so gating on it suppressed the reopen render for
+              // every job the member had sent from this device — the
+              // answer only ever appeared after leaving and re-entering
+              // a second time (2026-11-10).
+              var _xStartedLs = null; try { _xStartedLs = localStorage.getItem("pk_started_" + j.id); } catch (e) {}
+              if (!startedBgJobs[j.id] && !_xStartedLs && !renderedBgJobs[j.id] && Date.now() - (j.doneAt || 0) < BG_FRESH_MS) { found = true; resumeJob(j.id); }
             } else if (j.status === "pending" || j.status === "running") {
               convoId = j.convoId;
               pendingMine = true;

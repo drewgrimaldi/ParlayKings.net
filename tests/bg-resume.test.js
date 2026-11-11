@@ -63,6 +63,7 @@ async function typeMsg(text, userQ, provider) { await new Promise((r) => setTime
 function renderReasoning(text) { reasonedCalls.push(text); }
 function addPaywallMsg() {}
 function updateSpins() {}
+var openConvo;
 
 // ---- load the REAL code under test ----
 eval('var convoId = \'fresh\';');
@@ -107,6 +108,7 @@ function reset() {
   if (bgPollTimer) { clearInterval(bgPollTimer); bgPollTimer = 0; }
   jobScript = [];
   mineScript = [];
+  openConvo = undefined;
   convoId = 'fresh';
   location.search = '';
   for (const k of Object.keys(store)) delete store[k];
@@ -194,9 +196,12 @@ const doneJob = (over = {}) => Object.assign({
   eq(bgFirstSeen > 0, true, 'pending tap starts a watch window');
   // 9. Cross-chat reopen (2026-11-10): a job that finished in an earlier
   // visit, under a different chat, surfaces on a plain reopen — it used
-  // to be skipped for belonging to another chat.
+  // to be skipped for belonging to another chat. pk_seen is stamped at
+  // ENQUEUE time in the real flow, so it is set here too: gating the
+  // reopen on "seen" suppressed every one of these renders.
   reset();
   localStorage.setItem('pk_bg', '1');
+  localStorage.setItem('pk_seen_j9', '1');
   jobScript = [doneJob()];
   mineScript = [{ jobs: [doneJob()] }, { jobs: [doneJob()] }];
   resumeBgJobs();
@@ -214,6 +219,33 @@ const doneJob = (over = {}) => Object.assign({
   await drain(150);
   eq(convoId, 'c-run', 'running cross-chat job hands its chat to this page');
   eq(fetchUrls.length >= 2, true, 'running cross-chat job starts the watcher');
+
+  // 11. Watcher already drew it in THIS page: a tap resume must not
+  // draw a second copy — it only clears the thinking dots.
+  reset();
+  thinkingShown = true;
+  bgThinking = true;
+  renderedBgJobs['j9'] = 1;
+  jobScript = [doneJob()];
+  resumeJob('j9');
+  await drain(150);
+  eq(typedCalls.length, 0, 'already-rendered tap does not re-render');
+  eq(userMsgs.length, 0, 'already-rendered tap adds no second question bubble');
+  eq(thinkingShown, false, 'already-rendered tap clears the thinking dots');
+  eq(convoId, 'c-chat', 'already-rendered tap still adopts the chat');
+
+  // 12. The render claim lands BEFORE the saved chat opens, so the
+  // page watcher (same flag, checked synchronously on its tick) can
+  // never race a second copy in during the open.
+  reset();
+  let startedAtOpen = null;
+  openConvo = async (cid) => { startedAtOpen = localStorage.getItem('pk_started_j9'); return true; };
+  jobScript = [doneJob()];
+  resumeJob('j9');
+  await drain(150);
+  eq(startedAtOpen, '1', 'render claim is set before the saved chat opens');
+  eq(typedCalls.length, 0, 'saved-chat landing does not also type the reply');
+  eq(renderedBgJobs['j9'], 1, 'saved-chat landing marks the job rendered');
 
   // 4. Quiet load: no flag, nothing pending — no polling, no noise.
   reset();
