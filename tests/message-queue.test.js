@@ -81,7 +81,10 @@ function updateSpins() {}
 // scope, and only var/function declarations do that.
 eval('var busy = false; var QUEUE_MAX = 5; var msgQueue = [];');
 eval('var notifyArmed = false;');
-async function enqueueBgJob() { throw new Error('notify armed in queue test'); }
+const bgCalls = [];
+async function enqueueBgJob(t) { bgCalls.push(t); }
+let signedInStub = false;
+function chatsSignedIn() { return signedInStub; }
 eval('var selectedProvider = \'meta\';');
 eval('var conversationHistory = [];');
 eval(extract('renderQueue'));
@@ -172,6 +175,18 @@ function queueTexts() {
   eq(extract('renderQueue').includes('innerHTML'), false, 'queue renderer builds DOM nodes, no innerHTML');
   while (releasers.length) { releasers.shift()(); await drain(); }
   await drain();
+
+  // 7. Signed-in sends route to the background path (2026-11-10): the
+  // typed text goes to the background runner, not the in-page fetch, so
+  // the prediction survives leaving the page.
+  signedInStub = true;
+  const fetchesBeforeBg = fetchCalls.length;
+  input.value = 'BG ROUTE';
+  await send();
+  eq(JSON.stringify(bgCalls), JSON.stringify(['BG ROUTE']), 'signed-in send enqueues a background job');
+  eq(fetchCalls.length, fetchesBeforeBg, 'signed-in send fires no in-page fetch');
+  eq(input.value, '', 'input cleared after background send');
+  signedInStub = false;
 
   console.log(pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

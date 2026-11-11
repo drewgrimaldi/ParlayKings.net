@@ -192,6 +192,29 @@ const doneJob = (over = {}) => Object.assign({
   resumeBgJobs();
   await drain(150);
   eq(bgFirstSeen > 0, true, 'pending tap starts a watch window');
+  // 9. Cross-chat reopen (2026-11-10): a job that finished in an earlier
+  // visit, under a different chat, surfaces on a plain reopen — it used
+  // to be skipped for belonging to another chat.
+  reset();
+  localStorage.setItem('pk_bg', '1');
+  jobScript = [doneJob()];
+  mineScript = [{ jobs: [doneJob()] }, { jobs: [doneJob()] }];
+  resumeBgJobs();
+  await drain(250);
+  eq(convoId, 'c-chat', 'cross-chat reopen adopts the job chat');
+  eq(typedCalls.length, 1, 'cross-chat reopen renders the reply once');
+  eq(JSON.stringify(userMsgs), JSON.stringify(['A vs B']), 'cross-chat reopen shows the question');
+
+  // 10. Cross-chat still-running job: this page adopts its chat and
+  // starts watching instead of ignoring it.
+  reset();
+  localStorage.setItem('pk_bg', '1');
+  mineScript = [{ jobs: [{ id: 'p9', status: 'running', createdAt: 1, doneAt: 0, convoId: 'c-run', message: 'Q2' }] }, { jobs: [] }];
+  resumeBgJobs();
+  await drain(150);
+  eq(convoId, 'c-run', 'running cross-chat job hands its chat to this page');
+  eq(fetchUrls.length >= 2, true, 'running cross-chat job starts the watcher');
+
   // 4. Quiet load: no flag, nothing pending — no polling, no noise.
   reset();
   resumeBgJobs();

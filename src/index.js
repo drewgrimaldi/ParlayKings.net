@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-10 8:15 PM ET",
+    notes: `BACKGROUND PREDICTIONS NOW ARRIVE WHEN YOU LEAVE. A signed-in member's message used to run inside the page unless a separate bell toggle was armed: leave the page or lose the connection mid-answer and the prediction died with it ("Error: Load failed"), and even armed background runs often sent no notification. Three breaks fixed. (1) Signed-in sends now run as background predictions by default — ask, close the page, and the answer is still produced, saved to the chat, and pushed on completion; guests still run in-page, and the bell still controls push. (2) The completion push no longer depends on the starting browser handing its subscription to the job — the runner also sends to the member's saved subscription (matched even when the sign-in name's capitalization differs between devices), so a job started somewhere with no push support still notifies the device that has it. (3) Reopening the app now surfaces a prediction that finished in an earlier visit instead of skipping it for belonging to a different chat, a still-running one is picked up and watched, and the push handler still shows a notification when the finished job cannot be read back in time. Simulation, calibration, anchor and gates untouched. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-10 4:10 PM ET",
     notes: `PRICING TIER: PREDICTIONS NOW RUN ON THE CONTRIBUTOR MODEL. The prediction path now calls muse-spark-1.3-contributor instead of muse-spark-1.3 — the same Muse Spark 1.3 model at the contributor rate ($0.10 per million input tokens, $0.20 output, against $1.25 / $4.25 on the standard tier). Reasoning effort stays high. The trade for the lower rate: prompts and completions on this tier may be used by Meta for product improvement and model training. Nothing else changed — same simulations, factors, calibration, anchor and gates. Model stays 1.7.2.`
   },
@@ -21023,12 +21028,56 @@ async function runBgJob(env, ctx, kv, job, opts) {
     await kv.put(bgJobKey(job.id), JSON.stringify(job), { expirationTtl: BGJOB_TTL });
   } catch (err) {
   }
-  if (job.push && job.push.endpoint) {
+  // Completion push (fixed 2026-11-10): the push used to go ONLY to the
+  // subscription the starting browser passed along with the job. A job
+  // started in a browser or in-app view with no PushManager (or a lapsed
+  // subscription there) carried push=null and NO notification ever went
+  // out, even though the member had a live subscription saved from their
+  // app. Now: recipients are the job's own subscription PLUS the member's
+  // saved subscription — exact owner key first, then a case-insensitive
+  // owner match, because the same member's sign-in name is not cased the
+  // same on every device. Distinct endpoints each get a ticket; a saved
+  // subscription that answers 404/410 is removed.
+  const pushRecipients = [];
+  if (job.push && job.push.endpoint) pushRecipients.push({ sub: job.push, storedKey: null });
+  if (job.owner) {
+    let stored = null;
+    let storedKey = null;
     try {
-      const code = await sendPushTicket(env, job.push);
-      if (code === 404 || code === 410) {
+      const rawExact = await kv.get(pushSubKey(job.owner));
+      if (rawExact) {
+        stored = JSON.parse(rawExact);
+        storedKey = pushSubKey(job.owner);
+      }
+    } catch (err) {
+    }
+    if (!stored) {
+      try {
+        const keys = await kv.list({ prefix: PUSHSUB_PREFIX, limit: 100 });
+        for (const k of keys && keys.keys || []) {
+          const suffix = String(k.name || "").slice(PUSHSUB_PREFIX.length);
+          if (suffix && suffix.toLowerCase() === String(job.owner).toLowerCase()) {
+            const rawCi = await kv.get(k.name);
+            if (rawCi) {
+              stored = JSON.parse(rawCi);
+              storedKey = k.name;
+            }
+            break;
+          }
+        }
+      } catch (err) {
+      }
+    }
+    if (stored && stored.endpoint && !pushRecipients.some((r) => r.sub.endpoint === stored.endpoint)) {
+      pushRecipients.push({ sub: stored, storedKey });
+    }
+  }
+  for (const recipient of pushRecipients) {
+    try {
+      const code = await sendPushTicket(env, recipient.sub);
+      if ((code === 404 || code === 410) && recipient.storedKey) {
         try {
-          await kv.delete(pushSubKey(job.owner));
+          await kv.delete(recipient.storedKey);
         } catch (err) {
         }
       }
@@ -21081,6 +21130,11 @@ var SW_JS = [
   "        var a = alerts[ai] || {};",
   "        await self.registration.showNotification(a.title || 'ParlayKings', { body: a.body || '', icon: '/icon.jpg', badge: '/icon.jpg', tag: 'pk-alert-' + (a.id || ai), data: { url: a.url || '/' } });",
   "        if (a.id) shown.push(a.id);",
+  "      } catch (e) {}",
+  "    }",
+  "    if (!job && !shown.length) {",
+  "      try {",
+  "        await self.registration.showNotification('ParlayKings', { body: 'Your prediction is ready - tap to see it.', icon: '/icon.jpg', badge: '/icon.jpg', tag: 'pk-ready-generic', data: { url: '/' } });",
   "      } catch (e) {}",
   "    }",
   "    try {",
@@ -24409,7 +24463,11 @@ ${sportsbookDrawerHtml()}
       if (!res.ok || !data || !data.jobId) {
         document.getElementById("thinking")?.remove();
         bgThinking = false;
-        addMsg("ai", (data && data.error) || "Could not start the background run. Try sending normally.");
+        if (data && data.paywall) {
+          addPaywallMsg({ reply: data.error || "", predictionsLeft: data.predictionsLeft, spinsLeft: data.spinsLeft });
+        } else {
+          addMsg("ai", (data && data.error) || "Could not start the background run. Try sending normally.");
+        }
         return;
       }
       seenBgJobs[data.jobId] = 1;
@@ -25163,7 +25221,23 @@ ${sportsbookDrawerHtml()}
         jobs.forEach(function(j) {
           if (!j || !j.id) return;
           if (qj && j.id === qj) return;
-          if (j.convoId && j.convoId !== convoId) return;
+          // A job from an earlier visit belongs to a different chat than
+          // this fresh page, and it used to be skipped right here — so a
+          // prediction that finished while the app was closed never
+          // surfaced on reopen (fixed 2026-11-10). Finished jobs now
+          // resume through resumeJob, which adopts the job's saved chat;
+          // still-running jobs hand their chat to this page so the
+          // watcher picks them up.
+          if (j.convoId && j.convoId !== convoId) {
+            if (j.status === "done" || j.status === "failed") {
+              var _xSeenLs = null; try { _xSeenLs = localStorage.getItem("pk_seen_" + j.id); } catch (e) {}
+              if (!seenBgJobs[j.id] && !_xSeenLs && Date.now() - (j.doneAt || 0) < BG_FRESH_MS) { found = true; resumeJob(j.id); }
+            } else if (j.status === "pending" || j.status === "running") {
+              convoId = j.convoId;
+              pendingMine = true;
+            }
+            return;
+          }
           var _sSeenLs = null; try { _sSeenLs = localStorage.getItem("pk_seen_" + j.id); } catch (e) {}
           if ((j.status === "done" || j.status === "failed") && !seenBgJobs[j.id] && !_sSeenLs && Date.now() - (j.doneAt || 0) < BG_FRESH_MS) {
             seenBgJobs[j.id] = 1;
@@ -25679,7 +25753,15 @@ ${sportsbookDrawerHtml()}
 
   async function send(fromFlush) {
     const input = document.getElementById('input');
-    if (!fromFlush && notifyArmed) {
+    // Signed-in sends run in the background by default (2026-11-10): ask
+    // a prediction, leave the page entirely, and the answer is still
+    // produced server-side, saved to the chat, and pushed when it
+    // finishes. The old default ran the request inside the page, so
+    // leaving (or a dropped connection — the "Error: Load failed" in
+    // the screenshot) killed the prediction outright. Guests have no
+    // account to save to or notify, so guests still run in-page; the
+    // bell still controls push (off removes the saved subscription).
+    if (!fromFlush && (notifyArmed || chatsSignedIn())) {
       const t = input.value.trim();
       if (!t) return;
       input.value = '';
