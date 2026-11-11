@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-10 8:55 PM ET",
+    notes: `PREDICTION-READY TAPS LAND ON THE CHAT. Tapping a "Your prediction is ready" notification opened the parlaykings.net landing page instead of the chat with the finished prediction. Cause: the tap address was relative, and a notification subscription created on parlaykings.net runs this same worker under that origin, so the address resolved there. The prediction tap address (and the generic prediction-ready fallback) is now the full chat address — ai.grimaldi.tv with the prediction attached — so the tap lands on the answer from any subscription. Pick-alert taps are unchanged; those point at the board on purpose. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-10 8:45 PM ET",
     notes: `BACKGROUND PREDICTIONS: NO MORE DUPLICATES, NO MORE STUCK "THINKING". Follow-up to the 8:15 PM entry, from live use the same evening. (1) DUPLICATE ANSWERS: a finished prediction could be drawn twice — once from the saved chat when a notification tap opened it, and once by the page watcher racing it — and a prediction that finished while the app was closed could fail to surface on reopen at all because the reopen check keyed on a flag stamped when the message was sent, not when the answer was drawn. The render is now claimed once, up front, by whichever path gets there first; the tap path stands down when the watcher already drew the answer and just clears the thinking dots, and the reopen check keys on the drawn flag. (2) STUCK JOBS: the model's tool rounds had a round cap but no time budget, so a slow API could stretch one chat past six minutes and the job sat "running". Tool rounds now share a 150-second budget — past it, the model must answer from what it has, with no more tool calls — and the background runner aborts a wedged chat call at 285 seconds so the job always lands (done or failed) and its notification always goes out. (3) The push handler now re-reads the finished job up to three times before falling back to a generic notification, so a tap lands on the actual answer instead of the home page. Simulation, calibration, anchor and gates untouched. Model stays 1.7.2.`
   },
@@ -21140,7 +21145,12 @@ var SW_JS = [
   "    var body = 'Your prediction is ready - tap to see it.';",
   "    if (job && job.status === 'failed') body = 'Your background prediction hit a snag - open the app to retry.';",
   "    var tag = (job && job.id) || 'pk-ready';",
-  "    var url = job ? ('/?job=' + encodeURIComponent(job.id)) : '/';",
+  "    // Prediction taps land on the CHAT (ai.grimaldi.tv), never the",
+  "    // landing page: a subscription created on parlaykings.net runs",
+  "    // this same worker under that origin, so a relative tap url",
+  "    // resolves to the landing page (reported 2026-11-10). Absolute",
+  "    // on purpose; pick-alert taps below keep their own board urls.",
+  "    var url = job ? ('https://ai.grimaldi.tv/?job=' + encodeURIComponent(job.id)) : 'https://ai.grimaldi.tv/';",
   "    if (job) {",
   "      try {",
   "        await self.registration.showNotification('ParlayKings', { body: body, icon: '/icon.jpg', badge: '/icon.jpg', tag: tag, data: { url: url } });",
@@ -21156,7 +21166,7 @@ var SW_JS = [
   "    }",
   "    if (!job && !shown.length) {",
   "      try {",
-  "        await self.registration.showNotification('ParlayKings', { body: 'Your prediction is ready - tap to see it.', icon: '/icon.jpg', badge: '/icon.jpg', tag: 'pk-ready-generic', data: { url: '/' } });",
+  "        await self.registration.showNotification('ParlayKings', { body: 'Your prediction is ready - tap to see it.', icon: '/icon.jpg', badge: '/icon.jpg', tag: 'pk-ready-generic', data: { url: 'https://ai.grimaldi.tv/' } });",
   "      } catch (e) {}",
   "    }",
   "    try {",

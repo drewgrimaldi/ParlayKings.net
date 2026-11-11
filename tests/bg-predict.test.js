@@ -237,6 +237,12 @@ function eq(actual, expected, label) {
   eq(SW_JS.includes('notificationclick'), true, 'sw handles tap');
   eq(SW_JS.includes('pk-open-url'), true, 'tap hands the url to an open page');
   eq(SW_JS.includes('postMessage'), true, 'sw wakes a stale tab with the url');
+  // Prediction taps land on the CHAT, absolute (2026-11-10): a
+  // subscription created on parlaykings.net runs this worker under that
+  // origin, so a relative tap url resolved to the landing page.
+  eq(SW_JS.includes('https://ai.grimaldi.tv/?job='), true, 'prediction tap url is the chat, absolute');
+  eq(SW_JS.includes("'/?job='"), false, 'no relative prediction tap url remains');
+  eq(SW_JS.includes("url: 'https://ai.grimaldi.tv/'"), true, 'generic prediction tap also lands on the chat');
 
   // Enqueue must start the job immediately: POST /api/jobs may not leave the
   // job sitting pending until the minutely cron (up to 60s of dead wait on
