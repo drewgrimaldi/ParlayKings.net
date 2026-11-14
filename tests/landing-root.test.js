@@ -53,7 +53,7 @@ const names = ['isParlayLandingHost', 'landingHtmlForHost', 'landingEtToday', 'l
   'boardVisiblePicks', 'buildLandingBoard', 'teamLogoPair'];
 const code = names.map(extractFn).join('\n');
 eval('var LANDING_HTML = ' + JSON.stringify(EMBEDDED_HTML) + ';\n' + code +
-  '\n;global.__x = { isParlayLandingHost, landingHtmlForHost, buildLandingPayload, landingAddDays, buildLandingBoard };');
+  '\n;global.__x = { isParlayLandingHost, landingHtmlForHost, buildLandingPayload, landingAddDays, buildLandingBoard, todayET };');
 const X = global.__x;
 
 // --- host gate ---
@@ -82,6 +82,11 @@ check('served page background is dark royal purple', served.indexOf('--bg:#1d064
 check('served page names the free section Kings Corner', served.indexOf('Kings Corner') !== -1);
 check('served page says Kings Corner is free for everyone', served.indexOf('free for everyone every day') !== -1);
 check('Kings Corner heading carries the crown image', served.indexOf('class="kc-crown" src="/crown.png"') !== -1);
+check('mobile whoami rule is whole (no orphaned declarations)', served.indexOf("cursor:pointer;font-weight:700;font-size:14px;color:var(--gold);border-bottom:1px solid rgba(96,62,168,.45)}") !== -1 && served.indexOf('padding-left:10px}font-weight') === -1);
+check('sportsbook note uses a real color variable', served.indexOf('color:var(--muted)}') !== -1 && served.indexOf('var(--mut)') === -1);
+check('locked slate render keeps team logos', served.indexOf('logoA: p.logoA || null') !== -1);
+check('alert jump opens the write-up instead of toggling it', served.indexOf('if (body) body.hidden = false; else row.click();') !== -1);
+check('todayET returns a YYYY-MM-DD date', /^\d{4}-\d{2}-\d{2}$/.test(X.todayET()));
 
 // --- payload contract ---
 const today = (() => {
