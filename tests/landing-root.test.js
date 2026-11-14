@@ -79,6 +79,8 @@ check('served page has no ai.grimaldi.tv login link', served.indexOf('https://ai
 check('served page room links stay same-host via the handoff', served.indexOf('href="/sso/handoff?to=') !== -1);
 check('served page shows performance day by day', served.indexOf('day by day') !== -1 && served.indexOf('daily-list') !== -1);
 check('served page background is dark royal purple', served.indexOf('--bg:#1d0640') !== -1);
+check('served page names the free section Kings Corner', served.indexOf('Kings Corner') !== -1);
+check('served page says Kings Corner is free for everyone', served.indexOf('free for everyone every day') !== -1);
 
 // --- payload contract ---
 const today = (() => {
