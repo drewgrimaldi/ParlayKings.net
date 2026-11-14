@@ -81,6 +81,7 @@ check('served page shows performance day by day', served.indexOf('day by day') !
 check('served page background is dark royal purple', served.indexOf('--bg:#1d0640') !== -1);
 check('served page names the free section Kings Corner', served.indexOf('Kings Corner') !== -1);
 check('served page says Kings Corner is free for everyone', served.indexOf('free for everyone every day') !== -1);
+check('Kings Corner heading carries the crown image', served.indexOf('class="kc-crown" src="/crown.png"') !== -1);
 
 // --- payload contract ---
 const today = (() => {
