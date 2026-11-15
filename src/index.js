@@ -11604,7 +11604,7 @@ __name22(providerModelLabel, "providerModelLabel");
 __name222(providerModelLabel, "providerModelLabel");
 __name2222(providerModelLabel, "providerModelLabel");
 function providerDisplayLabel(provider) {
-  return "ParlayKings 1.6.1";
+  return "ParlayKings 1.7.2";
 }
 __name(providerDisplayLabel, "providerDisplayLabel");
 __name2(providerDisplayLabel, "providerDisplayLabel");
@@ -11651,7 +11651,7 @@ __name2222222222(airtableBaseIdForProvider, "airtableBaseIdForProvider");
 __name22222222222(airtableBaseIdForProvider, "airtableBaseIdForProvider");
 function airtableProviderTargets(env) {
   return [
-    { provider: "meta", label: "ParlayKings 1.6", baseId: airtableBaseIdForProvider(env, "meta") }
+    { provider: "meta", label: "ParlayKings 1.7.2", baseId: airtableBaseIdForProvider(env, "meta") }
   ];
 }
 __name(airtableProviderTargets, "airtableProviderTargets");
@@ -23556,7 +23556,7 @@ ${samNetworkNavHtml({ signedIn: !!session, isAdmin: isSlateAdmin(session), curre
     <div class="step auth"><div class="stitle">Sign-in gate checks your session</div><div class="ssub">Signed cookie, verified against your approved account &mdash; no valid session, no access</div></div>
     <div class="connector">&darr;</div>
 
-    <div class="step"><div class="stitle">You ask a question</div><div class="ssub">e.g. "Washington vs Michigan" &middot; ParlayKings 1.6</div></div>
+    <div class="step"><div class="stitle">You ask a question</div><div class="ssub">e.g. "Washington vs Michigan" &middot; ParlayKings 1.7.2</div></div>
     <div class="connector">&darr;</div>
 
     <div class="step"><div class="stitle">The model identifies the matchup</div><div class="ssub">Pulls the two sides and the sport from your message</div></div>
@@ -25772,13 +25772,13 @@ ${sportsbookDrawerHtml()}
       }
       const games = (board.games || []).filter((g) => !g.completed);
       const providers = [
-        { id: 'meta', label: 'ParlayKings 1.6' }
+        { id: 'meta', label: 'ParlayKings 1.7.2' }
       ];
       const isLogged = (g, provider) => !!(g.logged && g.logged[provider]);
       const leftover = (provider) => games.filter((g) => !isLogged(g, provider));
       const metaLeft = leftover('meta').length;
-      addMsg('ai', 'Today ' + board.date + ': ' + board.count + ' events, ' + (board.completed || 0) + ' final. Leftovers \u2014 ParlayKings 1.6 ' + metaLeft + '. Keep this tab open.');
-      setSlateStatus('ParlayKings 1.6 0 / ' + metaLeft);
+      addMsg('ai', 'Today ' + board.date + ': ' + board.count + ' events, ' + (board.completed || 0) + ' final. Leftovers \u2014 ParlayKings 1.7.2 ' + metaLeft + '. Keep this tab open.');
+      setSlateStatus('ParlayKings 1.7.2 0 / ' + metaLeft);
       let logged = 0;
       let skipped = 0;
       let failed = 0;
