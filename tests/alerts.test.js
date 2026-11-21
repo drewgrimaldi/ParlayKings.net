@@ -31,7 +31,7 @@ for (const v of ['var MOVE_CENTS_DEFAULT', 'var MOVE_CENTS_HR_DEFAULT', 'var GAM
 }
 for (const fn of ['normalizeAlertPrefs', 'etParts', 'inQuietHoursET',
   'collectInterests', 'interestMatches', 'fmtLinePrice',
-  'buildHighEdgeAlert', 'groupRecapByLeague', 'buildRecapAlert',
+  'buildHighEdgeAlert', 'fmtStartET', 'groupRecapByLeague', 'buildRecapAlert',
   'fetchGradedRecords',
   'movementDirection', 'buildLineMoveAlert', 'buildBundleEntry', 'alertLandingUrl',
   'shortTeamName', 'americanToImplied', 'parseAmericanPrice', 'parseOpeningLineFromText']) {
@@ -98,6 +98,16 @@ function eq(a, b, msg) {
   eq(heNoLine.body, 'A vs B · Predicted winner: A', 'missing line still names the predicted winner');
   eq(heNoLine.body.includes('unavailable'), false, 'missing line never prints unavailable in place of the winner');
   eq(heNoLine.short.includes('unavailable'), false, 'bundle line never prints unavailable either');
+  const startMs = Date.parse('2026-11-21T00:30:00Z'); // 7:30 PM ET
+  eq(fmtStartET(startMs, null), '7:30 PM ET', 'start time formats in Eastern');
+  const heTimed = buildHighEdgeAlert(
+    { matchup: 'Padres vs Rockies', winner: 'San Diego Padres', confidence: 78, league: 'MLB' },
+    { winnerPrice: -167, bookmakerTitle: 'DraftKings' }, startMs);
+  eq(heTimed.body, 'Padres vs Rockies · 7:30 PM ET · Predicted winner: San Diego Padres -167 (DraftKings)', 'timed high-edge body carries the game start');
+  eq(heTimed.startsAt, startMs, 'timed high-edge alert stores the start for the release');
+  eq(he.startsAt, undefined, 'untimed high-edge alert carries no start');
+  eq(src.includes('entry.startsAt'), true, 'dispatcher stores the start on the held entry');
+  eq(src.includes('lookupPickStartMs'), true, 'alert builders look the start up from the schedule');
 
   const groups = groupRecapByLeague(
     [{ league: 'MLB', result: 'Win' }, { league: 'MLB', result: 'Loss' }, { league: 'NFL', result: 'Win' }, { league: '', result: 'Win' }],
@@ -172,7 +182,8 @@ function eq(a, b, msg) {
   eq(src.includes('var ALERT_BUNDLE_TYPES = { lineMoves: true };'), true, 'pick alerts no longer bundle; line moves still do');
   eq(src.includes('alert.type === "highEdge"'), true, 'dispatcher holds pick alerts at dispatch');
   eq(src.includes('runPickHoldRelease'), true, 'alert pass releases held picks');
-  eq(src.includes('if (hour < 10) return;'), true, 'pick releases start at 10 AM ET');
+  eq(src.includes('var PICK_ALERT_LEAD_MS = 60 * 60 * 1000;'), true, 'timed pick releases land one hour before game start');
+  eq(src.includes('hour >= 10 && hold.releasedKey !== hourKey'), true, 'untimed pick releases keep the 10 AM hourly gate');
   eq(src.includes('var PICK_HOLD_BATCH = 12;'), true, 'pick releases batch twelve at a time');
   eq(src.includes('pkJumpToAlertGame'), true, 'notification tap jumps to the game write-up');
 

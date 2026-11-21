@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-20 8:52 PM ET",
+    notes: `PICK ALERTS CARRY THE GAME TIME, AND GO OUT BEFORE THE GAME. A pick alert's summary now includes the game's start time ("7:30 PM ET", with the weekday when the game is not today), read from ESPN's schedule for that matchup when the pick is logged; when no start can be found, the alert reads exactly as before. The start time is stored on the alert, and the held pick alerts now release game by game: each one goes out 1 hour before its game starts instead of in the flat hourly batches from 10 AM. Picks with no known start keep the old hourly release. Nothing else moved: same dispatcher, same preference gates, quiet hours, and caps, and the prediction pipeline is untouched. Tests: tests/alerts.test.js. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-13 8:47 PM ET",
     notes: `LANDING REPAIRS FROM AN OUTSIDE CODE REVIEW. Four fixes on the club front door: (1) the signed-in name row in the phone menu had a broken style rule under 820px — its bold gold styling was orphaned outside the rule and dropped; the rule is whole again. (2) Locked slate rows now show their team logos like the rest of the board — the data carried the logos, the render dropped them. (3) Tapping a game alert now always opens that game's write-up instead of toggling it shut when it was already open. (4) A sportsbook-drawer note pointed at a color variable that does not exist; fixed. Behind the page, todayET() now builds its date from parts instead of a locale format, so the YYYY-MM-DD shape holds on any runtime, and npm test now runs the full test suite. No model, pick, or gate changes. Model stays 1.7.2.`
   },
@@ -19826,18 +19831,20 @@ async function dispatchAlert(env, ns, alert) {
     const today = etParts(now).date;
     if (await alertCapReached(kv, ns, today)) { out.skipped = "rate-cap"; }
     const entry = { id: String(alert.dedupeKey || `${alert.type}:${now}`), type: alert.type, title: String(alert.title || "ParlayKings").slice(0, 120), body: String(alert.body || "").slice(0, 2000), at: now };
+    if (Number.isFinite(alert.startsAt)) entry.startsAt = alert.startsAt;
     // A tap on the notification lands on a screen showing the full message
     // (/?alert=<id>, backed by the alert history) unless the alert carries a
     // real destination of its own (recaps point at /stats).
     entry.url = alert.url && String(alert.url) !== "/" ? String(alert.url).slice(0, 200) : alertLandingUrl(entry.id);
-    // Pick alerts are HELD for the hourly release (Drew's order, 2026-11-07):
+    // Pick alerts are HELD for release (Drew's order, 2026-11-07):
     // the morning slate's picks used to land on phones all at once around
     // 5 AM. The hold sits after every preference gate (enabled, type,
     // interests, confidence floor, dedupe) and before the quiet-hours,
     // subscription and shared daily-cap checks, none of which apply to held
-    // picks — the hourly batch is their volume control, and the release
+    // picks — the release is their volume control, and the release
     // re-checks subscription and quiet hours. runPickHoldRelease (in the
-    // alert pass) moves them into the pending queue in batches.
+    // alert pass) moves them into the pending queue: timed by game start
+    // when the alert carries one, hourly batches otherwise.
     if (alert.type === "highEdge") {
       await appendAlertHistory(kv, ns, entry);
       await pickHoldEnqueue(kv, ns, entry);
@@ -19895,22 +19902,75 @@ function fmtLinePrice(price) {
   return (n > 0 ? "+" : "") + n;
 }
 __name(fmtLinePrice, "fmtLinePrice");
-function buildHighEdgeAlert(pick, line) {
+function fmtStartET(ms, eventDate) {
+  try {
+    const d = new Date(ms);
+    if (!Number.isFinite(d.getTime())) return null;
+    const time = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }).format(d);
+    const today = etParts(Date.now()).date;
+    if (eventDate && /^\d{4}-\d{2}-\d{2}$/.test(eventDate) && eventDate !== today) {
+      const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(d);
+      return `${day} ${time} ET`;
+    }
+    return `${time} ET`;
+  } catch (err) { return null; }
+}
+__name(fmtStartET, "fmtStartET");
+// The game's start time (ms epoch) from ESPN's schedule for this pick's
+// matchup, or null when no scheduled event can be matched. Drew's order
+// 2026-11-20: the start goes into the pick alert's summary and sets when
+// the held alert is released. A lookup miss never blocks the alert — the
+// alert just reads and releases the way it did before this existed.
+async function lookupPickStartMs(env, pick) {
+  try {
+    if (!pick || !pick.matchup) return null;
+    const path = ESPN_LEAGUE_PATHS[String(pick.league || "").toUpperCase()];
+    if (!path) return null;
+    const parts = String(pick.matchup).split(/\s+vs\.?\s+/i);
+    if (parts.length < 2) return null;
+    const teamA = parts[0].trim();
+    const teamB = parts.slice(1).join(" ").trim();
+    if (!teamA || !teamB) return null;
+    const ev = await findScoreboardEvent(path, teamA, teamB, pick.eventDate || null, env);
+    if (ev && ev.date) { const ms = Date.parse(ev.date); if (Number.isFinite(ms)) return ms; }
+    if (path === "mma/ufc") {
+      // UFC competitors are athletes, not teams — match them the way
+      // fetchUFCFightRounds does and take the card's start.
+      const board = await fetchScoreboardWindow("mma/ufc", scoreboardDayStrs(0, 21), env);
+      if (board.okDays > 0) {
+        const qA = matchName(teamA), qB = matchName(teamB);
+        const hit = (cs, q) => cs.some((c) => { const n = matchName(c.athlete?.fullName || c.athlete?.displayName || c.athlete?.shortName || ""); return n && (n.includes(q) || q.includes(n)); });
+        for (const e of board.events) {
+          for (const comp of e.competitions || []) {
+            const cs = comp.competitors || [];
+            if (qA && qB && hit(cs, qA) && hit(cs, qB)) { const ms = Date.parse(e.date); if (Number.isFinite(ms)) return ms; }
+          }
+        }
+      }
+    }
+    return null;
+  } catch (err) { return null; }
+}
+__name(lookupPickStartMs, "lookupPickStartMs");
+function buildHighEdgeAlert(pick, line, startsAt) {
   const conf = Number(pick.confidence);
   const confBit = Number.isFinite(conf) ? `${conf}%` : "pick";
   const lineBit = line && line.winnerPrice != null
     ? `${pick.winner} ${fmtLinePrice(line.winnerPrice)}${line.bookmakerTitle ? ` (${line.bookmakerTitle})` : ""}`
     : `${pick.winner}`;
-  return {
+  const timeBit = Number.isFinite(startsAt) ? fmtStartET(startsAt, pick.eventDate) : null;
+  const alert = {
     type: "highEdge",
     league: pick.league,
     matchup: pick.matchup,
     confidence: Number.isFinite(conf) ? conf : null,
     title: `ParlayKings ${confBit} — ${pick.winner}`,
-    body: `${pick.matchup} · Predicted winner: ${lineBit}`,
-    short: `${pick.winner}${Number.isFinite(conf) ? ` (${conf}%)` : ""} — ${pick.matchup} · ${lineBit}`,
+    body: `${pick.matchup}${timeBit ? ` · ${timeBit}` : ""} · Predicted winner: ${lineBit}`,
+    short: `${pick.winner}${Number.isFinite(conf) ? ` (${conf}%)` : ""} — ${pick.matchup}${timeBit ? ` · ${timeBit}` : ""} · ${lineBit}`,
     url: "/"
   };
+  if (Number.isFinite(startsAt)) alert.startsAt = startsAt;
+  return alert;
 }
 __name(buildHighEdgeAlert, "buildHighEdgeAlert");
 function highEdgeDedupeKey(recordId, ns) {
@@ -19922,7 +19982,9 @@ async function dispatchHighEdgeAlert(env, owner, pick, recordId, replyText) {
     if (!owner || owner === "Unknown" || !pick || !pick.matchup || !pick.winner) return { skipped: "bad-request" };
     let line = null;
     try { line = parseOpeningLineFromText(replyText); } catch (err) { line = null; }
-    const alert = buildHighEdgeAlert(pick, line);
+    let startsAt = null;
+    try { startsAt = await lookupPickStartMs(env, pick); } catch (err) { startsAt = null; }
+    const alert = buildHighEdgeAlert(pick, line, startsAt);
     if (recordId) alert.dedupeKey = highEdgeDedupeKey(recordId, owner);
     return await dispatchAlert(env, owner, alert);
   } catch (err) { return { skipped: "error" }; }
@@ -19943,7 +20005,9 @@ async function fanoutHighEdgeAlert(env, pick, recordId, replyText) {
     if (!users.length) return out;
     let line = null;
     try { line = parseOpeningLineFromText(replyText); } catch (err) { line = null; }
-    const base = buildHighEdgeAlert(pick, line);
+    let startsAt = null;
+    try { startsAt = await lookupPickStartMs(env, pick); } catch (err) { startsAt = null; }
+    const base = buildHighEdgeAlert(pick, line, startsAt);
     const today = etParts(Date.now()).date;
     const evd = String(pick.eventDate || "").slice(0, 10);
     const gameToday = !evd || evd === today;
@@ -20069,15 +20133,20 @@ async function runDripQueue(env, kv) {
   } catch (err) {}
 }
 __name(runDripQueue, "runDripQueue");
-// Pick hold: pick alerts (highEdge) accumulate here per user and release
-// into the pending queue in batches of PICK_HOLD_BATCH, at most one batch
-// per hour, starting at 10 AM ET (Drew's order, 2026-11-07). Before this,
-// the morning run's picks reached phones as one pile of individual
-// notifications around 5 AM. Game alerts, recaps and line moves are not
-// held — they still go out as they happen.
+// Pick hold: pick alerts (highEdge) accumulate here per user instead of
+// reaching phones as one pile around 5 AM (Drew's order, 2026-11-07).
+// Release runs on two rules: an alert whose game start is known releases
+// PICK_ALERT_LEAD_MS before that start (Drew's order, 2026-11-20); an
+// alert with no known start keeps the original rule — batches of
+// PICK_HOLD_BATCH, at most one batch per hour, starting at 10 AM ET.
+// Game alerts, recaps and line moves are not held — they still go out as
+// they happen.
 var PICK_HOLD_PREFIX = "pickhold:";
 var PICK_HOLD_BATCH = 12;
 var PICK_HOLD_TTL = 129600;
+// Timed release (Drew's order, 2026-11-20): a held pick alert whose game
+// start is known releases this long before the game starts.
+var PICK_ALERT_LEAD_MS = 60 * 60 * 1000;
 function pickHoldKey(ns) { return PICK_HOLD_PREFIX + ns; }
 __name(pickHoldKey, "pickHoldKey");
 async function loadPickHold(kv, ns) {
@@ -20111,14 +20180,12 @@ async function runPickHoldRelease(env, kv) {
     const now = Date.now();
     const et = etParts(now);
     const hour = Math.floor(et.mins / 60);
-    if (hour < 10) return;
     const hourKey = `${et.date}T${hour}`;
     for (const k of keys) {
       const ns = String(k.name || "").slice(PICK_HOLD_PREFIX.length);
       if (!ns) continue;
       const hold = await loadPickHold(kv, ns);
       if (!hold || !hold.items.length) continue;
-      if (hold.releasedKey === hourKey) continue;
       let prefs = null;
       try { const praw = await kv.get(`profile:${ns}`); prefs = normalizeAlertPrefs(praw ? JSON.parse(praw).notify : null); }
       catch (err) { prefs = normalizeAlertPrefs(null); }
@@ -20129,12 +20196,19 @@ async function runPickHoldRelease(env, kv) {
         continue;
       }
       if (inQuietHoursET(prefs.quietHours, now)) continue;
+      const timed = [], legacy = [];
+      for (const e of hold.items) (Number.isFinite(e && e.startsAt) ? timed : legacy).push(e);
+      const due = timed.filter((e) => e.startsAt - PICK_ALERT_LEAD_MS <= now);
+      const notDue = timed.filter((e) => e.startsAt - PICK_ALERT_LEAD_MS > now);
+      const legacyTake = hour >= 10 && hold.releasedKey !== hourKey ? legacy.slice(0, PICK_HOLD_BATCH) : [];
+      const want = due.concat(legacyTake);
+      if (!want.length) continue;
       const q = await loadAlertQueue(kv, ns);
       const room = Math.max(0, ALERT_QUEUE_CAP - q.length);
       if (!room) continue;
-      const take = hold.items.slice(0, Math.min(PICK_HOLD_BATCH, room));
-      hold.items = hold.items.slice(take.length);
-      hold.releasedKey = hourKey;
+      const take = want.slice(0, room);
+      hold.items = notDue.concat(legacy.slice(legacyTake.length), want.slice(room));
+      if (legacyTake.length && take.some((e) => !Number.isFinite(e && e.startsAt))) hold.releasedKey = hourKey;
       await savePickHold(kv, ns, hold);
       for (const e of take) q.push(e);
       await saveAlertQueue(kv, ns, q);
