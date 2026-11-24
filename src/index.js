@@ -17733,32 +17733,63 @@ function teamLogoPair(league, matchup, leagues) {
 // ESPN scoreboard fetch per league+date with a per-pick lookup fallback.
 // Returns a Map keyed `${league}|${matchup}|${date}` -> ms epoch or null.
 // A miss just leaves the card unchanged — never blocks the board.
+// Shared row set for the start-time cache: the picks on the two most
+// recent board dates, keyed `${league}|${matchup}|${date}`.
+function pickStartRows(records) {
+  const today = todayET();
+  const dateSet = new Set();
+  for (const r of records || []) {
+    const ed = boardDateKey((r && r.fields) || {});
+    if (ed && ed <= today) dateSet.add(ed);
+  }
+  const boardDates = [...dateSet].sort().reverse().slice(0, 2);
+  const rows = [];
+  const seen = new Set();
+  for (const r of records || []) {
+    const f = (r && r.fields) || {};
+    const ed = boardDateKey(f);
+    if (!boardDates.includes(ed)) continue;
+    const league = String(f["League"] || "");
+    const matchup = String(f["Bet Label"] || "");
+    if (!league || !matchup) continue;
+    const key = `${league}|${matchup}|${ed}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ league, matchup, ed, key });
+  }
+  return rows;
+}
+
+// Request path (landing data + board): KV reads ONLY, in parallel —
+// never an ESPN fetch while a visitor waits. The background resolver
+// below keeps the startat:v1 cache warm from the cron chain. A cache
+// miss just leaves the card without a time, same as an unmatched game.
 async function loadPickStarts(env, records) {
   const out = new Map();
   try {
-    const today = todayET();
-    const dateSet = new Set();
-    for (const r of records || []) {
-      const ed = boardDateKey((r && r.fields) || {});
-      if (ed && ed <= today) dateSet.add(ed);
-    }
-    const boardDates = [...dateSet].sort().reverse().slice(0, 2);
-    if (!boardDates.length) return out;
     const kv = env && env.SAM_BETS ? env.SAM_BETS : null;
-    const rows = [];
-    const seen = new Set();
-    for (const r of records || []) {
-      const f = (r && r.fields) || {};
-      const ed = boardDateKey(f);
-      if (!boardDates.includes(ed)) continue;
-      const league = String(f["League"] || "");
-      const matchup = String(f["Bet Label"] || "");
-      if (!league || !matchup) continue;
-      const key = `${league}|${matchup}|${ed}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      rows.push({ league, matchup, ed, key });
-    }
+    if (!kv) return out;
+    const rows = pickStartRows(records);
+    await Promise.all(rows.map(async (row) => {
+      try {
+        const raw = await kv.get(`startat:v1:${row.key}`);
+        if (raw != null) out.set(row.key, raw === "0" ? null : Number(raw) || null);
+      } catch (e) {}
+    }));
+  } catch (e) {}
+  return out;
+}
+
+// Background resolver: the full lookup chain (KV cache, then one ESPN
+// scoreboard fetch per league+date, then a per-pick lookup fallback),
+// writing results back to the startat:v1 cache. Runs from the cron
+// chain after the replica seed — never on a request path.
+async function resolvePickStarts(env, records) {
+  const out = new Map();
+  try {
+    const kv = env && env.SAM_BETS ? env.SAM_BETS : null;
+    const rows = pickStartRows(records);
+    if (!rows.length) return out;
     const todo = [];
     for (const row of rows) {
       let hit = false;
@@ -17807,6 +17838,7 @@ async function loadPickStarts(env, records) {
   return out;
 }
 __name(loadPickStarts, "loadPickStarts");
+__name(resolvePickStarts, "resolvePickStarts");
 function startTimeOf(startsMap, league, matchup, date) {
   if (!startsMap) return null;
   const ms = startsMap.get(`${league}|${matchup}|${date}`);
@@ -21420,6 +21452,7 @@ var ai_worker_current_default = {
       await processBgJobs(env, ctx);
       await gradeAllModelBets(env);
       await seedBetsReplicaFromAirtable(env);
+      try { const startRecs = await loadBetsReplica(env); if (Array.isArray(startRecs)) await resolvePickStarts(env, startRecs); } catch (e) {}
       await runAlertPass(env);
     })());
   },
