@@ -126,23 +126,10 @@ function loggedFields(tag, sim) {
   let m;
   while ((m = writeRe.exec(src)) !== null) writes.push(m.index);
   eq(writes.length > 0, true, 'bundle writes pick.confidence somewhere');
-  // NFL confidence deflation block (2026-10-18): a sanctioned rewrite
-  // site in the chat handler, immediately after band calibration.
-  const defAnchor = 'applyNflConfidenceDeflation(preDeflation)';
-  const defIdx = src.indexOf(defAnchor);
-  eq(defIdx >= 0, true, 'NFL deflation application present');
-  let defRange = { start: -2, end: -1 };
-  if (defIdx >= 0) {
-    const ifStart = src.lastIndexOf('if (pick && !isFiftyFiftyWinner(pick.winner)', defIdx);
-    let i = src.indexOf('{', ifStart), depth = 0;
-    for (; i < src.length; i++) {
-      if (src[i] === '{') depth++;
-      if (src[i] === '}') { depth--; if (!depth) break; }
-    }
-    defRange = { start: ifStart, end: i };
-  }
   // 80+ band cap block (2026-10-28): a sanctioned rewrite site in the
-  // chat handler, immediately after the NFL deflation.
+  // chat handler, immediately after band calibration. (The NFL
+  // deflation block that used to sit between them was removed
+  // 2026-11-23 on Drew's order.)
   const capAnchor = 'applyTopBandConfidenceCap(preCap)';
   const capIdx = src.indexOf(capAnchor);
   eq(capIdx >= 0, true, '80+ band cap application present');
@@ -156,9 +143,9 @@ function loggedFields(tag, sim) {
     }
     capRange = { start: ifStart, end: i };
   }
-  const allowed = lockRanges.concat([{ start: calStart, end: calEnd }, anchorRange, defRange, capRange]);
+  const allowed = lockRanges.concat([{ start: calStart, end: calEnd }, anchorRange, capRange]);
   const strays = writes.filter((k) => !allowed.some((r) => k > r.start && k < r.end));
-  eq(strays.length, 0, 'no pick.confidence rewrite outside sim lock + calibration + fifty stand + market anchor + NFL deflation + 80+ band cap');
+  eq(strays.length, 0, 'no pick.confidence rewrite outside sim lock + calibration + fifty stand + market anchor + 80+ band cap');
 
   console.log(pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

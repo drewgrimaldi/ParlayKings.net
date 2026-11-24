@@ -1,7 +1,7 @@
 // 80+ band confidence cap (2026-10-28): trailing-30d 80+ band went 12-8
 // (60.0%) against an 83.0% average stated confidence. Published confidence
 // at 80+ is capped at 79, all leagues, down-only, applied after band
-// calibration and the NFL deflation.
+// calibration.
 const fs = require('fs');
 const src = fs.readFileSync(__dirname + '/../src/index.js', 'utf8');
 let passed = 0, failed = 0;
@@ -28,9 +28,8 @@ check('exact 50 untouched (50/50 rule owns it)', applyTopBandConfidenceCap(50) =
 check('non-number passes through', applyTopBandConfidenceCap(null) === null && applyTopBandConfidenceCap(undefined) === undefined);
 check('never raises a number', [51, 60, 79, 80, 90, 99].every((n) => applyTopBandConfidenceCap(n) <= n));
 check('nothing below 80 ever moves', [1, 25, 49, 50, 51, 60, 70, 79].every((n) => applyTopBandConfidenceCap(n) === n));
-check('wired after band calibration and NFL deflation in the prediction path',
+check('wired after band calibration in the prediction path',
   src.includes('applyTopBandConfidenceCap(preCap)') &&
-  src.indexOf('applyTopBandConfidenceCap(preCap)') > src.indexOf('applyNflConfidenceDeflation(preDeflation)') &&
   src.indexOf('applyTopBandConfidenceCap(preCap)') > src.indexOf('applyBandCalibration(rawConfidence, finalCalibrationParams)'));
 console.log(`top-band-cap: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
