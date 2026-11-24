@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-23 10:56 PM ET",
+    notes: `NHL CONFIDENCE SHAVE - THE TWO CHANGES FROM TONIGHT'S CALIBRATION BRIEF, APPROVED BY DREW. NHL flipped in the last two weeks: Oct 24-Nov 8 it ran +0.5 against its confidence (n=62); Nov 9-22 it ran -9.5 (n=63). The 70s band is the worst of it - 30-day gap of -20.0 (n=26) - and the 50s band is leaking too, -10.7 over 14 days (n=28). As of this entry, an NHL pick's published confidence takes a down-only shave after band calibration and before the 80+ band cap: 5 points on picks at 70% or above, 3 points on picks in the 50s band. The 60s band is untouched - no shave was approved for it. Floor is 51 and exact-50 is untouched (the 50/50 rule owns it); market-anchor picks still log the market's implied price, set by the logger after this runs. Already-logged picks are unchanged. NCAAB running hot was reported as data only - no upward adjustment, per the down-only rule. Covered by tests/nhl-calibration-shave.test.js. Untouched: shrinkage 0.40, down-only band calibration, the 80+ cap at 79, the 50/50 rule, grading. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-23 8:11 PM ET",
     notes: `NFL CONFIDENCE SHAVE REMOVED. The extra 5-point down-only deflation on NFL published confidence — added 2026-10-18 when the calibration review flagged the NFL as a leak (26-38, .406 over the trailing 30 days) — is removed on Drew's order. With a full season of graded data now behind the band calibration, NFL confidence logs exactly as calibrated, the same as every other league. The restored nightly calibration review watches the NFL slice from here; if the leak returns, the shave can come back the same way it left. The 80+ band cap at 79 still applies to NFL picks as it does everywhere. Already-logged picks are unchanged. Untouched: shrinkage 0.40, down-only band calibration, the 80+ cap, the 50/50 rule, grading. Model stays 1.7.2.`
   },
@@ -15533,6 +15538,28 @@ __name22222222(applyBandCalibration, "applyBandCalibration");
 __name222222222(applyBandCalibration, "applyBandCalibration");
 __name2222222222(applyBandCalibration, "applyBandCalibration");
 __name22222222222(applyBandCalibration, "applyBandCalibration");
+const NHL_CALIBRATION_SHAVE_70PLUS_PTS = 5;
+const NHL_CALIBRATION_SHAVE_50S_PTS = 3;
+function applyNhlCalibrationShave(confidencePct) {
+  // NHL calibration shave (2026-11-23, Drew's order approving tonight's
+  // calibration brief): NHL flipped in the last two weeks - Nov 9-22 it
+  // ran -9.5 against its confidence (n=63) after +0.5 over Oct 24-Nov 8
+  // (n=62). The 70s band is the worst of it (30-day gap -20.0, n=26) and
+  // the 50s band is leaking too (-10.7 over 14 days, n=28). NHL published
+  // confidence takes a down-only shave after band calibration: 5 points
+  // at 70% or above, 3 points in the 50s band. The 60s band is
+  // untouched - no shave was approved for it. Down-only by construction:
+  // it can only lower a number, never raise one. The floor is 51 - a
+  // logged pick must stand on a side - and exact-50 is untouched (the
+  // 50/50 rule owns it). Market-anchor picks are not shaved in effect:
+  // the logger's anchor gate sets their logged confidence to the
+  // market's implied price after this runs.
+  if (typeof confidencePct !== "number" || confidencePct <= 50) return confidencePct;
+  if (confidencePct >= 70) return Math.max(51, confidencePct - NHL_CALIBRATION_SHAVE_70PLUS_PTS);
+  if (confidencePct < 60) return Math.max(51, confidencePct - NHL_CALIBRATION_SHAVE_50S_PTS);
+  return confidencePct;
+}
+__name(applyNhlCalibrationShave, "applyNhlCalibrationShave");
 const TOP_BAND_CONFIDENCE_CAP_PCT = 79;
 function applyTopBandConfidenceCap(confidencePct) {
   // 80+ band cap (2026-10-28): the trailing-30d calibration review found
@@ -23395,6 +23422,15 @@ ${sim.why}`;
             console.log(`Band calibration: ${actualProvider} raw confidence ${rawConfidence}% \u2192 calibrated ${calibratedConfidence}% (band ${calibrated.bucketLabel}, n=${calibrated.bucketN})`);
           }
           pick.confidence = calibratedConfidence;
+        }
+        if (pick && !isFiftyFiftyWinner(pick.winner) && typeof pick.confidence === "number" && normalizeLeague(pick.league) === "NHL") {
+          const preShave = pick.confidence;
+          const shavedConfidence = applyNhlCalibrationShave(preShave);
+          if (shavedConfidence !== preShave) {
+            cleanText = cleanText.split(`${preShave}%`).join(`${shavedConfidence}%`);
+            console.log(`NHL calibration shave: ${actualProvider} confidence ${preShave}% -> ${shavedConfidence}%`);
+            pick.confidence = shavedConfidence;
+          }
         }
         if (pick && !isFiftyFiftyWinner(pick.winner) && typeof pick.confidence === "number") {
           const preCap = pick.confidence;
