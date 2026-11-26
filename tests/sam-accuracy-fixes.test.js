@@ -66,6 +66,7 @@ const bundle = [
   'var TURNOVER_LUCK_DAMPEN = 0.3;',
   'var POINTS_PER_TURNOVER = 4.5;',
   extractFn('calculateLambdaMultiplier'),
+  extractFn('sosShrinkage'),
   extractFn('kvStatTable'),
   extractFn('getNhlMoneypuckTable'),
   extractFn('nhlAbbrForTeamName'),
@@ -187,6 +188,21 @@ function check(name, cond, extra) {
     ctxA: { recentFormDiff: 5, restDays: 0 }, ctxB: { recentFormDiff: -5, restDays: 2 }, league: 'NBA',
   });
   check('NBA composite does not price rest/form', nbaFormRest.edge === 0, nbaFormRest.edge);
+
+  // 10. Strength of schedule: sosDiff moves the lambda multiplier through
+  // its single sosFactor application (SOS_POINTS_TO_FACTOR 0.008, clamped
+  // [0.94, 1.06]); shrinkage damps thin game samples; missing sos is
+  // neutral (the multiplier's default 0 leaves the factor at exactly 1).
+  const sosBase = calculateLambdaMultiplier({});
+  const sosPlus = calculateLambdaMultiplier({ sosDiff: 6 });
+  const sosMinus = calculateLambdaMultiplier({ sosDiff: -6 });
+  check('sosDiff +6 raises the multiplier by exactly 6 x 0.008', Math.abs(sosPlus / sosBase - 1.048) < 1e-9, sosPlus);
+  check('sosDiff -6 lowers the multiplier symmetrically', Math.abs(sosMinus / sosBase - 0.952) < 1e-9, sosMinus);
+  check('sosDiff clamps at +1.06 / 0.94', calculateLambdaMultiplier({ sosDiff: 12 }) / sosBase === 1.06 && calculateLambdaMultiplier({ sosDiff: -12 }) / sosBase === 0.94, '');
+  check('Missing sosDiff stays neutral (factor 1)', sosBase === 1 && calculateLambdaMultiplier({ sosDiff: 0 }) === 1, sosBase);
+  check('sosShrinkage: full weight at 8+ games', sosShrinkage(8, 12) === 1 && sosShrinkage(11, 11) === 1, sosShrinkage(8, 12));
+  check('sosShrinkage: damps thin samples, floor 0.12', sosShrinkage(4, 9) === 0.5 && sosShrinkage(2, 3) === 0.25 && sosShrinkage(0, 0) === 0.12, sosShrinkage(4, 9) + '/' + sosShrinkage(0, 0));
+  check('sosShrinkage: missing gp counts as 0 games', sosShrinkage(undefined, 10) === 0.12 && sosShrinkage(10, null) === 0.12, '');
 
   console.log(`sam-accuracy-fixes: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
