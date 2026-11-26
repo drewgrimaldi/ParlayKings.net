@@ -144,5 +144,17 @@ check('shared nav: no Todays Board item (retired with /board)', navShared.indexO
 const chatNav = src.slice(src.indexOf('const chatPodcastLinks'), src.indexOf('${sportsbookDrawerHtml()}'));
 check('chat nav: no Todays Board item (retired with /board)', !chatNav.includes('href="/board">Today\'s Board</a>'));
 
+// --- start-time ordering (2026-11-26) ---
+for (const fn of ['startMsOf', 'sortByStartMs']) { eval(extractFn(fn)); }
+const smTest = new Map([['NFL|A vs B|2026-11-26', 300], ['NFL|C vs D|2026-11-26', 100]]);
+check('startMsOf resolves a known start', startMsOf(smTest, 'NFL', 'C vs D', '2026-11-26') === 100);
+check('startMsOf missing -> null', startMsOf(smTest, 'NFL', 'X vs Y', '2026-11-26') === null && startMsOf(null, 'NFL', 'C vs D', '2026-11-26') === null);
+const orderedRows = sortByStartMs([
+  { row: 'late', ms: 300 }, { row: 'early', ms: 100 }, { row: 'mid', ms: 200 },
+  { row: 'nostart1', ms: null }, { row: 'nostart2', ms: null }, { row: 'alsomid', ms: 200 }
+]);
+check('board rows sort by start time, earliest first, no-start rows last in order', orderedRows.join(',') === 'early,mid,alsomid,late,nostart1,nostart2');
+check('board builders sort by start time', src.includes('picks: sortByStartMs(gated.visible.map') && src.includes('locked: sortByStartMs(gated.locked.map') && src.includes('const freePicks = sortByStartMs(ranked.slice(0, 3).map') && src.includes('const slate = sortByStartMs(ranked.filter'));
+
 console.log(`board tests: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

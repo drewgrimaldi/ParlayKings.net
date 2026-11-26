@@ -50,7 +50,7 @@ const names = ['isParlayLandingHost', 'landingHtmlForHost', 'landingEtToday', 'l
   'landingAddDays', 'landingConfPct', 'landingResultOf', 'buildLandingPayload',
   'todayET', 'boardDateKey', 'boardConfPct', 'boardAnalysisOf', 'boardResultSummaryOf',
   'boardPickFromRecord', 'boardChooseDate', 'boardBandRates', 'boardRankDay',
-  'boardVisiblePicks', 'buildLandingBoard', 'teamLogoPair'];
+  'boardVisiblePicks', 'buildLandingBoard', 'teamLogoPair', 'etParts', 'fmtStartET', 'startTimeOf', 'startMsOf', 'sortByStartMs'];
 const code = names.map(extractFn).join('\n');
 eval('var LANDING_HTML = ' + JSON.stringify(EMBEDDED_HTML) + ';\n' + code +
   '\n;global.__x = { isParlayLandingHost, landingHtmlForHost, buildLandingPayload, landingAddDays, buildLandingBoard, todayET };');
@@ -130,6 +130,15 @@ const free = X.buildLandingBoard(records, false);
 check('unlock: free member gets the free three plus locked rows', free.picks.length === 3 && free.locked.length === 2);
 check('unlock: free locked rows carry league + matchup ONLY', free.locked.every((s) => Object.keys(s).sort().join(',') === 'league,matchup'));
 check('unlock: empty book stays empty', X.buildLandingBoard([], true).picks.length === 0);
+
+// --- game start times on the cards (2026-11-20) ---
+const startsMap = new Map([['NBA|Alpha vs Beta|' + today, Date.parse(today + 'T23:30:00Z')]]);
+const timedPayload = X.buildLandingPayload(records, null, startsMap);
+check('cards: free pick carries its start time', timedPayload.freePicks.some((p) => p.matchup === 'Alpha vs Beta' && /^\d{1,2}:\d{2} [AP]M ET$/.test(p.startTime || '')));
+check('cards: untimed free picks carry no startTime key', timedPayload.freePicks.filter((p) => p.matchup !== 'Alpha vs Beta').every((p) => !('startTime' in p)));
+const timedBoard = X.buildLandingBoard(records, true, null, null, startsMap);
+check('cards: unlocked board row carries its start time', timedBoard.picks.some((p) => p.matchup === 'Alpha vs Beta' && /ET$/.test(p.startTime || '')));
+check('cards: board without a starts map carries no startTime key', full.picks.every((p) => !('startTime' in p)));
 
 // --- route wiring present in the handler ---
 check('/api/landing-data route is wired', src.indexOf('url.pathname === "/api/landing-data"') !== -1);

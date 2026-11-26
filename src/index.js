@@ -27,6 +27,12 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: '2026-11-26 12:40 PM ET',
+    title: 'DAILY BOARD SORTED BY START TIME',
+    notes: `Display order only. The daily board now lists games in start-time order, earliest first: the member board's picks and locked rows, and the landing page's free picks and slate, all sorted by the start times the board already resolves for each game. Games with no resolved start time keep their previous relative order at the end. Which picks are free, which are locked, and every count are unchanged. Covered by tests/board.test.js start-time checks. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: '2026-11-26 11:40 AM ET',
     title: 'INJURY FEED IR GAP FIXED',
     notes: `ESPN's league injury feed drops players a few days after they land on injured reserve: Aidan Hutchinson (IR Nov 18, torn ACL, out for the season) was absent from the feed on Nov 26, so the sim priced Detroit's defense at full strength and the writeup cited him as a live factor. The roster payload keeps the IR status with its date. getInjuryReport now merges recent injured-reserve designations (21-day window) from the team's roster into the injury report it returns, deduped by name against the feed list and appended after the feed lines, fail-open if the roster fetch fails. The 21-day window is deliberate: a player lost months ago is already out of the team's recent stats, so haircutting for him would price his absence twice; a player lost this month is still inside the season stats the sim reads, which is exactly what the injury haircut exists to correct. scoreInjuryReport already scored 'Injured Reserve' as OUT - it simply never saw these names. Covered by sam-accuracy-fixes.test.js checks 11 (recent IR found, stale IR skipped, non-IR skipped, merged line scores as OUT). Full suite green. Untouched: SCORING_MODEL.stdDev, CONSERVATISM_SHRINKAGE 0.40, band calibration, marketAnchorDecision. Model label stays SAM 1.7.2.`
@@ -17948,6 +17954,25 @@ function startTimeOf(startsMap, league, matchup, date) {
   return Number.isFinite(ms) ? fmtStartET(ms, date) : null;
 }
 __name(startTimeOf, "startTimeOf");
+function startMsOf(startsMap, league, matchup, date) {
+  if (!startsMap) return null;
+  const ms = startsMap.get(`${league}|${matchup}|${date}`);
+  return Number.isFinite(ms) ? ms : null;
+}
+__name(startMsOf, "startMsOf");
+function sortByStartMs(pairs) {
+  return pairs
+    .map((pair, i) => ({ pair, i }))
+    .sort((a, b) => {
+      const am = a.pair.ms, bm = b.pair.ms;
+      if (am == null && bm == null) return a.i - b.i;
+      if (am == null) return 1;
+      if (bm == null) return -1;
+      return am !== bm ? am - bm : a.i - b.i;
+    })
+    .map(({ pair }) => pair.row);
+}
+__name(sortByStartMs, "sortByStartMs");
 function buildLandingBoard(records, fullAccess, logoDir, followsList, startsMap) {
   const today = todayET();
   const byDate = new Map();
@@ -17967,7 +17992,7 @@ function buildLandingBoard(records, fullAccess, logoDir, followsList, startsMap)
     ok: true,
     date: boardDate,
     fullAccess: !!fullAccess,
-    picks: gated.visible.map((p) => {
+    picks: sortByStartMs(gated.visible.map((p) => {
       const lp = teamLogoPair(p.league, p.matchup, logoDir);
       const row = {
         league: p.league, matchup: p.matchup, pick: p.pick,
@@ -17981,15 +18006,15 @@ function buildLandingBoard(records, fullAccess, logoDir, followsList, startsMap)
       };
       const st = startTimeOf(startsMap, p.league, p.matchup, boardDate);
       if (st) row.startTime = st;
-      return row;
-    }),
-    locked: gated.locked.map((p) => {
+      return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate) };
+    })),
+    locked: sortByStartMs(gated.locked.map((p) => {
       const lp = teamLogoPair(p.league, p.matchup, logoDir);
       const row = lp ? { league: p.league, matchup: p.matchup, logoA: lp.logoA, logoB: lp.logoB } : { league: p.league, matchup: p.matchup };
       const st = startTimeOf(startsMap, p.league, p.matchup, boardDate);
       if (st) row.startTime = st;
-      return row;
-    })
+      return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate) };
+    }))
   };
 }
 
@@ -18076,21 +18101,21 @@ function buildLandingPayload(records, logoDir, startsMap) {
   }
   const boardPicks = boardDate ? picksByDate.get(boardDate) || [] : [];
   const ranked = rankDay(boardPicks);
-  const freePicks = ranked.slice(0, 3).map((p) => {
+  const freePicks = sortByStartMs(ranked.slice(0, 3).map((p) => {
     const lp = teamLogoPair(p.league, p.matchup, logoDir);
     const row = { league: p.league, matchup: p.matchup, pick: p.pick, confidence: p.confidence, logoA: lp ? lp.logoA : null, logoB: lp ? lp.logoB : null };
     const st = startTimeOf(startsMap, p.league, p.matchup, boardDate);
     if (st) row.startTime = st;
-    return row;
-  });
+    return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate) };
+  }));
   const freeSet = new Set(ranked.slice(0, 3));
-  const slate = ranked.filter((p) => !freeSet.has(p)).slice(0, 24).map((p) => {
+  const slate = sortByStartMs(ranked.filter((p) => !freeSet.has(p)).slice(0, 24).map((p) => {
     const lp = teamLogoPair(p.league, p.matchup, logoDir);
     const row = lp ? { league: p.league, matchup: p.matchup, logoA: lp.logoA, logoB: lp.logoB } : { league: p.league, matchup: p.matchup };
     const st = startTimeOf(startsMap, p.league, p.matchup, boardDate);
     if (st) row.startTime = st;
-    return row;
-  });
+    return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate) };
+  }));
 
   const daily = [...byDay.entries()]
     .filter(([d]) => d <= today)
