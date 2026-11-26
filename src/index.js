@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-25 11:58 PM ET",
+    notes: `DOUBLE-COUNT REMOVAL + PACE LEAK CLOSED. Three wiring repairs; no calibration changes. (1) LAMBDA MULTIPLIER: when the football or basketball weighted composite is on, the rest, recent-form, and injury multipliers in calculateLambdaMultiplier now go neutral - those three are priced head-to-head inside the composites, so they were counted twice on every NFL/CFB/NBA/CBB sim. Travel, weather, and SOS stay multiplicative. (2) FOOTBALL HOME FIELD: the football composite's home-field factor no longer reads homeFieldPts; home field is applied once, via homeFieldPts in bridgeToTeamSim - the same single-application pattern basketball already used. (3) BASKETBALL MATCHUP FACTOR: pace no longer enters the style term directionally (it still leaked a win edge to the faster team after the pace factor itself was neutralized); the factor is the 3P-reliance contrast only, at its previous weight. Also: tests/sam-accuracy-fixes.test.js is now part of the npm test chain, and the football importance-weights test now asserts rest stays neutral with the composite on. Covered by tests/sam-accuracy-fixes.test.js (14 checks) and the full suite. Untouched: SCORING_MODEL stdDev, shrinkage 0.40, band calibration, league bias, the 80+ cap, the market anchor, grading. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-25 10:35 PM ET",
     notes: `ACCURACY BUG FIXES. Five repairs to the factor composites plus one data-wiring upgrade; no calibration changes. (1) NHL PDO now regresses unsustainable puck luck instead of rewarding it: the composite edge reads the PDO differential from the other side, so the luckier team's edge shrinks. (2) NFL WEATHER: bad-weather points no longer enter the directional edge, where they penalized Team A and rewarded Team B purely by argument order; weather still widens variance and suppresses both offenses symmetrically. (3) INJURIES: the basketball composite now reads the live injuryCountFactor (it was reading a legacy key, so its injury factor never fired), and in both basketball and football a healthy side defaults to 1.0 so one-sided injuries register instead of being skipped. (4) BASKETBALL PACE is neutral on directional margin - pace drives total possessions, not who wins; the weight slot is unchanged. (5) TENNIS: the first server in a simulated set is no longer always Player A. (6) NHL DATA: the MoneyPuck table is read live from KV (nhl_moneypuck_v1, refreshed weekly with all 32 teams and goalies), with the embedded table as fallback. Covered by tests/sam-accuracy-fixes.test.js. Untouched: SCORING_MODEL stdDev, shrinkage 0.40, band calibration, league bias, the 80+ cap, the market anchor, grading. Model stays 1.7.2.`
   },
@@ -4214,25 +4219,27 @@ function calculateLambdaMultiplier({ restDays = 2, travelTier = "home", recentFo
   if (restDays === 0) restFactor = 0.96;
   else if (restDays === 1) restFactor = 0.98;
   else if (restDays >= 3) restFactor = 1.02;
+  // Rest is priced inside the football and basketball composites; when one
+  // is on, the multiplier stays neutral so rest is never counted twice.
+  if (footballCompositeOn === true || basketballCompositeOn === true) restFactor = 1;
   let travelFactor = 1;
   if (travelTier === "long") travelFactor = 0.97;
   else if (travelTier === "medium") travelFactor = 0.99;
   else if (travelTier === "short") travelFactor = 1;
-  const formFactor = Math.max(0.92, Math.min(1.08, 1 + recentFormDiff * 8e-3));
-  // FOOTBALL IMPORTANCE WEIGHTS (Drew's call 2026-10-02, Gemini-revised): when
-  // the weighted composite is on, it already prices the QB, line play, and
-  // the efficiency bits as head-to-head point edges — the old multiplicative
-  // slots go neutral so nothing is counted twice. Rest, travel, form,
-  // weather, injuries, and SOS are untouched. Only the football branch ever
-  // sets
-  // footballCompositeOn, so other sports are unaffected.
+  const formFactor = (footballCompositeOn === true || basketballCompositeOn === true) ? 1 : Math.max(0.92, Math.min(1.08, 1 + recentFormDiff * 8e-3));
+  // When a weighted composite is on (football or basketball), it already
+  // prices the QB, line play, and the efficiency bits as head-to-head point
+  // edges — the old multiplicative slots go neutral so nothing is counted
+  // twice. Rest, form, and injuries are priced inside the composites too,
+  // so their multipliers also go neutral when a composite is on. Travel,
+  // weather, and SOS stay multiplicative.
   const fbCompositeOff = footballCompositeOn === true;
   // NOTE: there is deliberately no separate injury-severity multiplier here.
   // Severity is already encoded per-player inside scoreInjuryReport (OUT = 1.0x,
   // Doubtful = 0.7x, Questionable/day-to-day = 0.4x of position weight). A flat
   // most-severe-status multiplier on top would double-count the same signal.
   const pFactor = fbCompositeOff ? 1 : (typeof pitcherFactor === "number" && isFinite(pitcherFactor) ? pitcherFactor : 1);
-  const iFactor = typeof injuryCountFactor === "number" && isFinite(injuryCountFactor) ? injuryCountFactor : 1;
+  const iFactor = (footballCompositeOn === true || basketballCompositeOn === true) ? 1 : (typeof injuryCountFactor === "number" && isFinite(injuryCountFactor) ? injuryCountFactor : 1);
   const sosIn = typeof sosDiff === "number" && isFinite(sosDiff) ? sosDiff : 0;
   const sosFactor = Math.max(0.94, Math.min(1.06, 1 + sosIn * SOS_POINTS_TO_FACTOR));
   const toMargin = fbCompositeOff ? 0 : (typeof turnoverMarginPerGame === "number" && isFinite(turnoverMarginPerGame) ? turnoverMarginPerGame : 0);
@@ -5480,15 +5487,15 @@ function nbaWeightedCompositeEdge(o) {
     add("rest", W.rest, norm(d, 3, 2) * sh, `rest ${d >= 0 ? "+" : ""}${d.toFixed(0)}d`);
   }
   // ---- 12. Matchup / Style (3%) ---------------------------------------------------------
-  // Pace clash + 3P-reliance contrast: the team whose style is further from the
-  // opponent's comfort zone gets the edge.
+  // 3P-reliance contrast only. Pace used to enter this term directionally
+  // (paceEdge); that kept pace as a win edge after factor 7 was neutralized —
+  // pace is a total-points driver, not a directional edge.
   const tpmA = num(pA.tpm), fgmA = num(pA.fgm);
   const tpmB = num(pB.tpm), fgmB = num(pB.fgm);
-  if (num(pA.pace) != null && num(pB.pace) != null && tpmA != null && fgmA > 0 && tpmB != null && fgmB > 0) {
+  if (tpmA != null && fgmA > 0 && tpmB != null && fgmB > 0) {
     const relyA = tpmA / fgmA, relyB = tpmB / fgmB;
-    const paceEdge = (pA.pace - pB.pace) / 10;
     const relyEdge = (relyA - relyB) * 8;
-    const d = (paceEdge + relyEdge) / 2;
+    const d = relyEdge / 2;
     add("matchup", W.matchup, norm(d, 2, 2) * sh, `style ${d >= 0 ? "+" : ""}${d.toFixed(2)}`);
   }
   return { edge: E, bits };
@@ -5648,11 +5655,10 @@ function footballWeightedCompositeEdge(o) {
     }
   }
   // ---- 12. Home-Field Advantage (2%) -------------------------------------------------------
-  const hfA = num(ctxA.homeFieldPts), hfB = num(ctxB.homeFieldPts);
-  if (hfA != null || hfB != null) {
-    const d = (hfA || 0) - (hfB || 0);
-    add("homeField", W.homeField, d, `HFA ${d >= 0 ? "+" : ""}${d.toFixed(1)}`);
-  } else if (ctxA.isHome && !ctxB.isHome) {
+  // Home field is applied once, via homeFieldPts in bridgeToTeamSim — this
+  // factor must not price it again. Only the isHome fallback below can fire,
+  // and the sim path does not set isHome, so this stays neutral in practice.
+  if (ctxA.isHome && !ctxB.isHome) {
     add("homeField", W.homeField, 2.5, `home +2.5`);
   } else if (ctxB.isHome && !ctxA.isHome) {
     add("homeField", W.homeField, -2.5, `away -2.5`);

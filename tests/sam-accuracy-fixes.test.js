@@ -60,6 +60,12 @@ const bundle = [
   'var _nhlMoneypuckCache = { at: 0, table: null };',
   'var KV_STAT_TTL_MS = 3600e3;',
   'var WTA_EDGE_HOLD_SCALE = 0.08;',
+  'var FOOTBALL_WIND_15_FACTOR = 0.985;',
+  'var FOOTBALL_WIND_20_FACTOR = 0.97;',
+  'var SOS_POINTS_TO_FACTOR = 8e-3;',
+  'var TURNOVER_LUCK_DAMPEN = 0.3;',
+  'var POINTS_PER_TURNOVER = 4.5;',
+  extractFn('calculateLambdaMultiplier'),
   extractFn('kvStatTable'),
   extractFn('getNhlMoneypuckTable'),
   extractFn('nhlAbbrForTeamName'),
@@ -139,12 +145,35 @@ function check(name, cond, extra) {
   });
   check('NBA pace factor does not fire as directional edge', !paceRes.bits.some((b) => b.startsWith('pace ')), paceRes.bits);
 
+  // 5b. Matchup factor must not leak pace directionally either: profiles that
+  // differ ONLY in pace produce zero edge.
+  check('NBA matchup factor has no pace leak (pace-only diff = 0 edge)', paceRes.edge === 0, paceRes.edge);
+
   // 6. Tennis first server is randomized
   let aWins = 0;
   const N = 20000;
   for (let i = 0; i < N; i++) if (simulateTennisSet(0.80, 0.80, 0) === 'A') aWins++;
   const aRate = aWins / N;
   check('Tennis equal-hold set simulation is unbiased (~50%)', Math.abs(aRate - 0.5) < 0.02, aRate);
+
+  // 7. Lambda multiplier: rest / form / injury go neutral when a composite is
+  // on (the composites price them head-to-head); they still apply with no
+  // composite.
+  const lamGatedF = calculateLambdaMultiplier({ restDays: 0, recentFormDiff: 5, injuryCountFactor: 0.9, footballCompositeOn: true });
+  const lamGatedB = calculateLambdaMultiplier({ restDays: 0, recentFormDiff: 5, injuryCountFactor: 0.9, basketballCompositeOn: true });
+  const lamOpen = calculateLambdaMultiplier({ restDays: 0, recentFormDiff: 5, injuryCountFactor: 0.9 });
+  check('Lambda rest/form/injury neutral when football composite on', lamGatedF === 1, lamGatedF);
+  check('Lambda rest/form/injury neutral when basketball composite on', lamGatedB === 1, lamGatedB);
+  check('Lambda rest/form/injury still apply with no composite', lamOpen < 0.95, lamOpen);
+
+  // 8. Football composite must not price home field a second time:
+  // homeFieldPts is applied once in bridgeToTeamSim.
+  const hfaRes = footballWeightedCompositeEdge({
+    teamA: 'Springfield Atoms', teamB: 'Shelbyville Sharks',
+    ctxA: { homeFieldPts: 2 }, ctxB: {},
+    profA: {}, profB: {}, gpA: 8, gpB: 8, league: 'NFL', avgPoints: 22,
+  });
+  check('Football composite does not re-price homeFieldPts', hfaRes.edge === 0, hfaRes.edge);
 
   console.log(`sam-accuracy-fixes: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
