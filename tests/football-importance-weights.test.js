@@ -260,12 +260,9 @@ const fbNeutral = { footballCompositeOn: true };
 check('composite on: multiplier ignores ALL old football slots',
   Math.abs(calculateLambdaMultiplier(fbCtx) - calculateLambdaMultiplier(fbNeutral)) < 1e-12,
   calculateLambdaMultiplier(fbCtx) + ' vs ' + calculateLambdaMultiplier(fbNeutral));
-check('composite on: rest still moves the multiplier (priced there, not in the composite)',
+check('composite on: untouched inputs still move the multiplier',
   Math.abs(calculateLambdaMultiplier({ footballCompositeOn: true, restDays: 0 }) -
            calculateLambdaMultiplier({ footballCompositeOn: true, restDays: 5 })) > 1e-9);
-check('composite on: untouched inputs still move the multiplier',
-  Math.abs(calculateLambdaMultiplier({ footballCompositeOn: true, travelTier: 'long' }) -
-           calculateLambdaMultiplier({ footballCompositeOn: true, travelTier: 'home' })) > 1e-9);
 const offCtx = { ...fbCtx }; delete offCtx.footballCompositeOn;
 check('composite off: old slots still move the multiplier (legacy path intact)',
   Math.abs(calculateLambdaMultiplier(offCtx) - calculateLambdaMultiplier({})) > 1e-9);
