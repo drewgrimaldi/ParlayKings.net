@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-26 09:35 AM ET",
+    notes: `DOUBLE-COUNT PLACEMENT CORRECTED. The 11:58 PM entry put rest, recent form, and injuries in the wrong carrier. Gating them off in calculateLambdaMultiplier zeroed those inputs for CFB entirely - the CFB composite's 15 factors are all on-field efficiency metrics with no injury, rest, or form terms - and compressed them to near-zero for NFL and NBA, where the composite blocks carry only 1-6% weights against small point caps (an OUT starting QB priced at about 0.12 pts through the composite vs about 2.6 pts through the multiplier; an NBA back-to-back at about 0.04 pts vs about 4.6 pts). Fix: restFactor, formFactor, and iFactor are active in calculateLambdaMultiplier again at full scoring-level scale, covering every football and basketball league uniformly, and the composites' own blocks are neutral instead - football factors 10 (injuries), 13 (recent form), 14 (rest/travel, which also removes the small overlapping travel term) and basketball factors 8 (recent form), 9 (injuries), 11 (rest). Each signal is now priced exactly once, at full magnitude. Home field stays single-applied via the bridge and the NBA pace leak stays closed. Covered by tests/sam-accuracy-fixes.test.js (15 checks) and the full suite. Untouched: SCORING_MODEL stdDev, shrinkage 0.40, band calibration, league bias, the 80+ cap, the market anchor, grading. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-25 11:58 PM ET",
     notes: `DOUBLE-COUNT REMOVAL + PACE LEAK CLOSED. Three wiring repairs; no calibration changes. (1) LAMBDA MULTIPLIER: when the football or basketball weighted composite is on, the rest, recent-form, and injury multipliers in calculateLambdaMultiplier now go neutral - those three are priced head-to-head inside the composites, so they were counted twice on every NFL/CFB/NBA/CBB sim. Travel, weather, and SOS stay multiplicative. (2) FOOTBALL HOME FIELD: the football composite's home-field factor no longer reads homeFieldPts; home field is applied once, via homeFieldPts in bridgeToTeamSim - the same single-application pattern basketball already used. (3) BASKETBALL MATCHUP FACTOR: pace no longer enters the style term directionally (it still leaked a win edge to the faster team after the pace factor itself was neutralized); the factor is the 3P-reliance contrast only, at its previous weight. Also: tests/sam-accuracy-fixes.test.js is now part of the npm test chain, and the football importance-weights test now asserts rest stays neutral with the composite on. Covered by tests/sam-accuracy-fixes.test.js (14 checks) and the full suite. Untouched: SCORING_MODEL stdDev, shrinkage 0.40, band calibration, league bias, the 80+ cap, the market anchor, grading. Model stays 1.7.2.`
   },
@@ -4219,27 +4224,27 @@ function calculateLambdaMultiplier({ restDays = 2, travelTier = "home", recentFo
   if (restDays === 0) restFactor = 0.96;
   else if (restDays === 1) restFactor = 0.98;
   else if (restDays >= 3) restFactor = 1.02;
-  // Rest is priced inside the football and basketball composites; when one
-  // is on, the multiplier stays neutral so rest is never counted twice.
-  if (footballCompositeOn === true || basketballCompositeOn === true) restFactor = 1;
+  // Rest, form, and injuries are priced in this multiplier (see below).
   let travelFactor = 1;
   if (travelTier === "long") travelFactor = 0.97;
   else if (travelTier === "medium") travelFactor = 0.99;
   else if (travelTier === "short") travelFactor = 1;
-  const formFactor = (footballCompositeOn === true || basketballCompositeOn === true) ? 1 : Math.max(0.92, Math.min(1.08, 1 + recentFormDiff * 8e-3));
-  // When a weighted composite is on (football or basketball), it already
-  // prices the QB, line play, and the efficiency bits as head-to-head point
-  // edges — the old multiplicative slots go neutral so nothing is counted
-  // twice. Rest, form, and injuries are priced inside the composites too,
-  // so their multipliers also go neutral when a composite is on. Travel,
-  // weather, and SOS stay multiplicative.
+  const formFactor = Math.max(0.92, Math.min(1.08, 1 + recentFormDiff * 8e-3));
+  // When a weighted composite is on (football or basketball), it prices the
+  // QB, line play, and the efficiency bits as head-to-head point edges — the
+  // old multiplicative slots for those go neutral so nothing is counted
+  // twice. Rest, form, and injuries are priced HERE, in this multiplier:
+  // it scales them to each league's scoring level, and it covers CFB, whose
+  // composite has no rest/form/injury factors at all. The composites' own
+  // rest/form/injury blocks are neutral. Travel, weather, and SOS also
+  // stay multiplicative.
   const fbCompositeOff = footballCompositeOn === true;
   // NOTE: there is deliberately no separate injury-severity multiplier here.
   // Severity is already encoded per-player inside scoreInjuryReport (OUT = 1.0x,
   // Doubtful = 0.7x, Questionable/day-to-day = 0.4x of position weight). A flat
   // most-severe-status multiplier on top would double-count the same signal.
   const pFactor = fbCompositeOff ? 1 : (typeof pitcherFactor === "number" && isFinite(pitcherFactor) ? pitcherFactor : 1);
-  const iFactor = (footballCompositeOn === true || basketballCompositeOn === true) ? 1 : (typeof injuryCountFactor === "number" && isFinite(injuryCountFactor) ? injuryCountFactor : 1);
+  const iFactor = typeof injuryCountFactor === "number" && isFinite(injuryCountFactor) ? injuryCountFactor : 1;
   const sosIn = typeof sosDiff === "number" && isFinite(sosDiff) ? sosDiff : 0;
   const sosFactor = Math.max(0.94, Math.min(1.06, 1 + sosIn * SOS_POINTS_TO_FACTOR));
   const toMargin = fbCompositeOff ? 0 : (typeof turnoverMarginPerGame === "number" && isFinite(turnoverMarginPerGame) ? turnoverMarginPerGame : 0);
@@ -5456,23 +5461,13 @@ function nbaWeightedCompositeEdge(o) {
     // Intentionally neutral on directional margin.
   }
   // ---- 8. Recent Form (6%) -----------------------------------------------------
-  const formA = ctxA && num(ctxA.recentFormDiff);
-  const formB = ctxB && num(ctxB.recentFormDiff);
-  if (formA != null || formB != null) {
-    const d = (formA || 0) - (formB || 0);
-    add("recentForm", W.recentForm, norm(d, 4, 3) * sh, `form ${d >= 0 ? "+" : ""}${d.toFixed(1)}`);
-  }
+  // Neutral: recent form is priced in calculateLambdaMultiplier (formFactor),
+  // where it scales with the league's scoring level. Pricing it here as well
+  // double-counted it, and this block's weighted share was far too small to
+  // carry it on its own.
   // ---- 9. Injuries (5%) ---------------------------------------------------------
-  // Read live injuryCountFactor (with legacy injuryFactor fallback) and default a
-  // healthy side to 1.0 so one-sided injuries still fire in the composite.
-  const rawInjA = ctxA && (num(ctxA.injuryCountFactor) ?? num(ctxA.injuryFactor));
-  const rawInjB = ctxB && (num(ctxB.injuryCountFactor) ?? num(ctxB.injuryFactor));
-  if (rawInjA != null || rawInjB != null) {
-    const injA = rawInjA != null ? rawInjA : 1;
-    const injB = rawInjB != null ? rawInjB : 1;
-    const d = (injA - 1) - (injB - 1);
-    add("injuries", W.injuries, norm(d, 0.08, 4) * sh, `inj ${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)}pp`);
-  }
+  // Neutral: injuries are priced in calculateLambdaMultiplier (iFactor),
+  // same reasoning as recent form above.
   // ---- 10. Home-Court Advantage (4%) ----------------------------------------------
   const hcPts = league === "CBB" ? 4 : 3;
   const homeA = ctxA && ctxA.isHome;
@@ -5480,12 +5475,8 @@ function nbaWeightedCompositeEdge(o) {
   if (homeA && !homeB) add("homeCourt", W.homeCourt, hcPts, `home +${hcPts}`);
   else if (homeB && !homeA) add("homeCourt", W.homeCourt, -hcPts, `away -${hcPts}`);
   // ---- 11. Rest / Fatigue (3%) -------------------------------------------------------
-  const restA = ctxA && num(ctxA.restDays);
-  const restB = ctxB && num(ctxB.restDays);
-  if (restA != null && restB != null) {
-    const d = restA - restB;
-    add("rest", W.rest, norm(d, 3, 2) * sh, `rest ${d >= 0 ? "+" : ""}${d.toFixed(0)}d`);
-  }
+  // Neutral: rest is priced in calculateLambdaMultiplier (restFactor),
+  // same reasoning as recent form and injuries above.
   // ---- 12. Matchup / Style (3%) ---------------------------------------------------------
   // 3P-reliance contrast only. Pace used to enter this term directionally
   // (paceEdge); that kept pace as a win edge after factor 7 was neutralized —
@@ -5636,14 +5627,10 @@ function footballWeightedCompositeEdge(o) {
     }
   }
   // ---- 10. Injuries / Player Availability (3%) ---------------------------------------
-  // Default a healthy side to 1.0 so one-sided injuries fire (the exact case with real edge).
-  const rawInjA = num(ctxA.injuryCountFactor), rawInjB = num(ctxB.injuryCountFactor);
-  if (rawInjA != null || rawInjB != null) {
-    const injA = rawInjA != null ? rawInjA : 1;
-    const injB = rawInjB != null ? rawInjB : 1;
-    const d = (injA - 1) - (injB - 1);
-    add("injuries", W.injuries, norm(d, 0.10, 4), `inj ${(d * 100).toFixed(1)}pp`);
-  }
+  // Neutral: injuries are priced in calculateLambdaMultiplier (iFactor),
+  // where they scale with the league's scoring level. Pricing them here as
+  // well double-counted them, and this block's weighted share was far too
+  // small to carry them on its own.
   // ---- 11. Special Teams (3%) ----------------------------------------------------------
   if (eA && eB && num(eA.stEpa) != null && num(eB.stEpa) != null) {
     const d = (eA.stEpa / Math.max(1, eA.gp || 1)) - (eB.stEpa / Math.max(1, eB.gp || 1));
@@ -5664,21 +5651,12 @@ function footballWeightedCompositeEdge(o) {
     add("homeField", W.homeField, -2.5, `away -2.5`);
   }
   // ---- 13. Recent Form (2%) -------------------------------------------------------------------
-  const formA = num(ctxA.recentFormDiff), formB = num(ctxB.recentFormDiff);
-  if (formA != null || formB != null) {
-    const d = (formA || 0) - (formB || 0);
-    add("recentForm", W.recentForm, norm(d, 4, 2.5), `form ${d >= 0 ? "+" : ""}${d.toFixed(1)}`);
-  }
+  // Neutral: recent form is priced in calculateLambdaMultiplier (formFactor),
+  // for the same reason as injuries above.
   // ---- 14. Rest / Travel (1%) ----------------------------------------------------------------------
-  const restA = num(ctxA.restDays), restB = num(ctxB.restDays);
-  if (restA != null && restB != null) {
-    const d = restA - restB;
-    let pts = norm(d, 3, 1.5);
-    // Travel penalty: long travel hurts.
-    if (ctxA.travelTier === "long") pts -= 0.5;
-    if (ctxB.travelTier === "long") pts += 0.5;
-    add("rest", W.rest, pts, `rest ${d >= 0 ? "+" : ""}${d.toFixed(0)}d`);
-  }
+  // Neutral: rest and travel are priced in calculateLambdaMultiplier
+  // (restFactor, travelFactor). The small travel term that lived here was a
+  // second, overlapping application of the same signal.
   // ---- 15. Weather (1%) --------------------------------------------------------------------------------
   // Symmetric stadium weather widens variance (addVar) and suppresses both offenses in
   // calculateLambdaMultiplier; do NOT add negative wPts to directional E (which would

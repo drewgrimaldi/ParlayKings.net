@@ -120,13 +120,14 @@ function check(name, cond, extra) {
   check('NFL bad weather produces 0 directional edge', wxRes.edge === 0, wxRes.edge);
   check('NFL bad weather still widens variance (varMult > 1)', wxRes.varMult > 1, wxRes.varMult);
 
-  // 4. NFL one-sided injury fires when healthy side is unset
+  // 4. NFL composite is injury-neutral: injuries are priced in the lambda
+  // multiplier, where they scale with scoring level (and cover CFB).
   const nflInjA = footballWeightedCompositeEdge({
     teamA: 'Springfield Atoms', teamB: 'Shelbyville Sharks',
     ctxA: { injuryCountFactor: 0.88 }, ctxB: {},
     profA: {}, profB: {}, gpA: 8, gpB: 8, league: 'NFL', avgPoints: 22,
   });
-  check('NFL one-sided injury on A produces negative edge', nflInjA.edge < 0, nflInjA.edge);
+  check('NFL composite does not price injuries (multiplier does)', nflInjA.edge === 0, nflInjA.edge);
 
   // 5. NBA live injuryCountFactor fires (including one-sided) and pace is neutral
   const baseProfile = { gamesPlayed: 20, efg: 54, tovPct: 13, oreb: 24, dreb: 70, ftRate: 0.25, threePct: 36, pace: 100, tpm: 12, fgm: 40, pts: 112 };
@@ -135,7 +136,7 @@ function check(name, cond, extra) {
     teamA: 'A', teamB: 'B', statsA: baseStats, statsB: baseStats,
     ctxA: { injuryCountFactor: 0.90 }, ctxB: {}, league: 'NBA',
   });
-  check('NBA one-sided injuryCountFactor on A produces negative edge', nbaInj.edge < 0, nbaInj.edge);
+  check('NBA composite does not price injuries (multiplier does)', nbaInj.edge === 0, nbaInj.edge);
 
   const fastStats = { ...baseStats, basketballProfile: { ...baseProfile, pace: 106 } };
   const slowStats = { ...baseStats, basketballProfile: { ...baseProfile, pace: 94 } };
@@ -156,15 +157,14 @@ function check(name, cond, extra) {
   const aRate = aWins / N;
   check('Tennis equal-hold set simulation is unbiased (~50%)', Math.abs(aRate - 0.5) < 0.02, aRate);
 
-  // 7. Lambda multiplier: rest / form / injury go neutral when a composite is
-  // on (the composites price them head-to-head); they still apply with no
-  // composite.
+  // 7. Lambda multiplier: rest / form / injury are priced HERE at full
+  // scoring-level scale, whether or not a composite is on — the composites'
+  // own blocks are neutral, and CFB's composite has none of these factors.
   const lamGatedF = calculateLambdaMultiplier({ restDays: 0, recentFormDiff: 5, injuryCountFactor: 0.9, footballCompositeOn: true });
   const lamGatedB = calculateLambdaMultiplier({ restDays: 0, recentFormDiff: 5, injuryCountFactor: 0.9, basketballCompositeOn: true });
   const lamOpen = calculateLambdaMultiplier({ restDays: 0, recentFormDiff: 5, injuryCountFactor: 0.9 });
-  check('Lambda rest/form/injury neutral when football composite on', lamGatedF === 1, lamGatedF);
-  check('Lambda rest/form/injury neutral when basketball composite on', lamGatedB === 1, lamGatedB);
-  check('Lambda rest/form/injury still apply with no composite', lamOpen < 0.95, lamOpen);
+  check('Lambda rest/form/injury stay active when football composite on', lamGatedF === lamOpen && lamOpen < 0.95, lamGatedF + ' vs ' + lamOpen);
+  check('Lambda rest/form/injury stay active when basketball composite on', lamGatedB === lamOpen, lamGatedB + ' vs ' + lamOpen);
 
   // 8. Football composite must not price home field a second time:
   // homeFieldPts is applied once in bridgeToTeamSim.
@@ -174,6 +174,19 @@ function check(name, cond, extra) {
     profA: {}, profB: {}, gpA: 8, gpB: 8, league: 'NFL', avgPoints: 22,
   });
   check('Football composite does not re-price homeFieldPts', hfaRes.edge === 0, hfaRes.edge);
+
+  // 9. Composites are rest/form neutral too (priced in the multiplier).
+  const fbFormRest = footballWeightedCompositeEdge({
+    teamA: 'Springfield Atoms', teamB: 'Shelbyville Sharks',
+    ctxA: { recentFormDiff: 5, restDays: 0 }, ctxB: { recentFormDiff: -5, restDays: 3 },
+    profA: {}, profB: {}, gpA: 8, gpB: 8, league: 'NFL', avgPoints: 22,
+  });
+  check('Football composite does not price rest/form', fbFormRest.edge === 0, fbFormRest.edge);
+  const nbaFormRest = nbaWeightedCompositeEdge({
+    teamA: 'A', teamB: 'B', statsA: baseStats, statsB: baseStats,
+    ctxA: { recentFormDiff: 5, restDays: 0 }, ctxB: { recentFormDiff: -5, restDays: 2 }, league: 'NBA',
+  });
+  check('NBA composite does not price rest/form', nbaFormRest.edge === 0, nbaFormRest.edge);
 
   console.log(`sam-accuracy-fixes: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
