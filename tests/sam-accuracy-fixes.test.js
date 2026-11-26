@@ -67,6 +67,10 @@ const bundle = [
   'var POINTS_PER_TURNOVER = 4.5;',
   extractFn('calculateLambdaMultiplier'),
   extractFn('sosShrinkage'),
+  extractFn('rosterIrPlayers'),
+  extractFn('scoreInjuryReport'),
+  extractFn('normalizeLeague'),
+  extractConst('INJURY_POS_WEIGHTS'),
   extractFn('kvStatTable'),
   extractFn('getNhlMoneypuckTable'),
   extractFn('nhlAbbrForTeamName'),
@@ -203,6 +207,26 @@ function check(name, cond, extra) {
   check('sosShrinkage: full weight at 8+ games', sosShrinkage(8, 12) === 1 && sosShrinkage(11, 11) === 1, sosShrinkage(8, 12));
   check('sosShrinkage: damps thin samples, floor 0.12', sosShrinkage(4, 9) === 0.5 && sosShrinkage(2, 3) === 0.25 && sosShrinkage(0, 0) === 0.12, sosShrinkage(4, 9) + '/' + sosShrinkage(0, 0));
   check('sosShrinkage: missing gp counts as 0 games', sosShrinkage(undefined, 10) === 0.12 && sosShrinkage(10, null) === 0.12, '');
+
+  // 11. Roster IR merge: the league injury feed drops players days after
+  // they land on IR (Hutchinson, IR Nov 18, missing from the Nov 26 feed).
+  // rosterIrPlayers must surface recent IR designations from the roster
+  // payload, skip stale ones (>21 days, already out of the team's stats),
+  // skip non-IR statuses, and the merged line must score as OUT.
+  const NOW = Date.parse('2026-11-26T16:00:00Z');
+  const fakeRoster = { athletes: [{ position: 'Defense', items: [
+    { displayName: 'Aidan Hutchinson', position: { abbreviation: 'DE' }, injuries: [{ status: 'Injured Reserve', date: '2026-11-18T22:02Z' }] },
+    { displayName: 'Jack Campbell', position: { abbreviation: 'LB' }, injuries: [{ status: 'Injured Reserve', date: '2026-11-07T22:18Z' }] },
+    { displayName: 'Stale Stash', position: { abbreviation: 'WR' }, injuries: [{ status: 'Injured Reserve', date: '2026-09-01T00:00:00Z' }] },
+    { displayName: 'Healthy Guy', position: { abbreviation: 'CB' }, injuries: [] },
+    { displayName: 'Weekly Questionable', position: { abbreviation: 'S' }, injuries: [{ status: 'Questionable', date: '2026-11-25T00:00:00Z' }] },
+  ] }] };
+  const irFound = rosterIrPlayers(fakeRoster, NOW).map((p) => p.name);
+  check('Roster IR merge finds recent IR players (Hutchinson, Campbell)', irFound.includes('Aidan Hutchinson') && irFound.includes('Jack Campbell'), irFound.join(','));
+  check('Roster IR merge skips stale IR (>21 days)', !irFound.includes('Stale Stash'), irFound.join(','));
+  check('Roster IR merge skips non-IR statuses', !irFound.includes('Weekly Questionable') && !irFound.includes('Healthy Guy'), irFound.join(','));
+  const irScored = scoreInjuryReport('Detroit Lions injury report:\n- Aidan Hutchinson (DE): Injured Reserve', 'NFL');
+  check('Merged IR line scores as OUT (factor < 1, highlighted)', irScored.factor < 1 && irScored.highlights.some((h) => h.includes('Hutchinson')), JSON.stringify(irScored));
 
   console.log(`sam-accuracy-fixes: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

@@ -26,7 +26,13 @@ var __defProp22222222222 = Object.defineProperty;
 var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __defProp22222222222(target, "name", { value, configurable: true }), "__name");
 var CHANGELOG = [
   {
-    version: '1.7.2',
+    version: "1.7.2",
+    date: '2026-11-26 11:40 AM ET',
+    title: 'INJURY FEED IR GAP FIXED',
+    notes: `ESPN's league injury feed drops players a few days after they land on injured reserve: Aidan Hutchinson (IR Nov 18, torn ACL, out for the season) was absent from the feed on Nov 26, so the sim priced Detroit's defense at full strength and the writeup cited him as a live factor. The roster payload keeps the IR status with its date. getInjuryReport now merges recent injured-reserve designations (21-day window) from the team's roster into the injury report it returns, deduped by name against the feed list and appended after the feed lines, fail-open if the roster fetch fails. The 21-day window is deliberate: a player lost months ago is already out of the team's recent stats, so haircutting for him would price his absence twice; a player lost this month is still inside the season stats the sim reads, which is exactly what the injury haircut exists to correct. scoreInjuryReport already scored 'Injured Reserve' as OUT - it simply never saw these names. Covered by sam-accuracy-fixes.test.js checks 11 (recent IR found, stale IR skipped, non-IR skipped, merged line scores as OUT). Full suite green. Untouched: SCORING_MODEL.stdDev, CONSERVATISM_SHRINKAGE 0.40, band calibration, marketAnchorDecision. Model label stays SAM 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: '2026-11-26 10:20 AM ET',
     title: 'STRENGTH OF SCHEDULE WIRED (NFL + CFB)',
     notes: `sosDiff is populated for the first time. The weekly stat tables now carry a per-team sos: NFL = mean opponent net EPA across completed games x65 plays, in points per game vs league average (nfl_epa_refresh.py); CFB = mean opponent scoring margin from completed games (cfb_adv_refresh.py). Both zero-centered, clamped (NFL +/-6, CFB +/-12), stored in KV (nfl_epa_v1, cfb_adv_v1) and in the embedded fallback tables. runMatchupSimulationCore sets contextA/contextB.sosDiff from the tables with early-season shrinkage (full weight at 8+ games played, floor 0.12); if either team lacks an sos value, both sides stay neutral. calculateLambdaMultiplier stays the single place sos applies for football (sosFactor, 0.008 per point, clamped 0.94-1.06); a trace line prints in the sim output when sosDiff is non-zero. Basketball is unchanged: wiring sosDiff there later requires disabling one of its two application points first (the multiplier or the NBA composite sos term) so it is never double-counted. Also fixed: both refresh scripts patched the repo with re.sub using the raw JSON as the replacement string, which crashed on backslash escapes in team names - now a lambda replacement. Covered by sam-accuracy-fixes.test.js checks 10 (multiplier symmetry and clamps, shrinkage curve, missing-sos neutrality). Full suite green. Untouched: SCORING_MODEL.stdDev, CONSERVATISM_SHRINKAGE 0.40, band calibration, marketAnchorDecision. Model label stays SAM 1.7.2.`
@@ -3198,6 +3204,30 @@ __name222222(blendMlbPitchingFactors, "blendMlbPitchingFactors");
 __name2222222(blendMlbPitchingFactors, "blendMlbPitchingFactors");
 __name22222222(blendMlbPitchingFactors, "blendMlbPitchingFactors");
 __name222222222(blendMlbPitchingFactors, "blendMlbPitchingFactors");
+// Roster IR extraction (2026-11-26): ESPN's league injury feed drops
+// players a few days after they land on injured reserve - Aidan Hutchinson
+// (IR Nov 18) was absent from the feed on Nov 26 while the model still
+// priced and narrated him as playing. The roster payload keeps the IR
+// status with its date. Only RECENT designations (21 days) merge into the
+// scored report: a player lost months ago is already out of the team's
+// recent stats, so haircutting for him would price his absence twice.
+function rosterIrPlayers(rosterData, nowMs = Date.now()) {
+  const out = [];
+  const groups = (rosterData && rosterData.athletes) || [];
+  for (const g of groups) {
+    for (const a of (g && g.items) || []) {
+      const inj = a && Array.isArray(a.injuries) ? a.injuries[0] : null;
+      if (!inj || !/injured reserve/i.test(inj.status || "")) continue;
+      const when = inj.date ? Date.parse(inj.date) : NaN;
+      if (isFinite(when) && nowMs - when > 21 * 24 * 3600 * 1000) continue;
+      out.push({
+        name: a.displayName || a.fullName || a.shortName || "Unknown player",
+        pos: (a.position && (a.position.abbreviation || a.position.name)) || "",
+      });
+    }
+  }
+  return out;
+}
 async function getInjuryReport({ league, team } = {}, env = null) {
   try {
     const key = normalizeLeague(league);
@@ -3223,7 +3253,6 @@ async function getInjuryReport({ league, team } = {}, env = null) {
     });
     if (!teamEntry) return `No injury report found for "${team}" in ${league} right now.`;
     const injuryList = teamEntry.injuries || [];
-    if (injuryList.length === 0) return `${team}: no players currently listed on the injury report.`;
     const lines = injuryList.slice(0, 12).map((inj) => {
       const name = inj.athlete?.displayName || inj.athlete?.fullName || inj.athlete?.shortName || "Unknown player";
       const pos = inj.athlete?.position?.abbreviation || inj.athlete?.position?.name || "";
@@ -3231,6 +3260,29 @@ async function getInjuryReport({ league, team } = {}, env = null) {
       const detail = inj.details?.detail || inj.shortComment || inj.longComment || inj.type?.detail || "";
       return `- ${name}${pos ? ` (${pos})` : ""}: ${status}${detail ? ` \u2014 ${detail}` : ""}`;
     });
+    // IR MERGE (2026-11-26): add recent injured-reserve designations the
+    // league feed dropped (see rosterIrPlayers). Deduped by name against
+    // the feed list; appended after the feed lines so they never displace
+    // current-week designations. Fail-open: any error leaves the feed
+    // report exactly as it was.
+    try {
+      const matchedTeam = await resolveEspnTeam(path, team, env);
+      if (matchedTeam && matchedTeam.id) {
+        const rosterRes = await fetchEspnWithRetry(`https://site.web.api.espn.com/apis/site/v2/sports/${path}/teams/${matchedTeam.id}/roster`, {}, { env });
+        if (rosterRes && rosterRes.ok) {
+          const rosterData = await rosterRes.json();
+          const feedNames = new Set(injuryList.map((inj) => (inj.athlete?.displayName || inj.athlete?.fullName || "").toLowerCase().trim()));
+          for (const p of rosterIrPlayers(rosterData)) {
+            if (!feedNames.has(p.name.toLowerCase().trim())) {
+              lines.push(`- ${p.name}${p.pos ? ` (${p.pos})` : ""}: Injured Reserve`);
+            }
+          }
+        }
+      }
+    } catch (irErr) {
+      console.error("Roster IR merge failed:", irErr.message);
+    }
+    if (lines.length === 0) return `${team}: no players currently listed on the injury report.`;
     return `${team} injury report:
 ${lines.join("\n")}`;
   } catch (err) {
