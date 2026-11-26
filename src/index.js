@@ -27,6 +27,11 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: "2026-11-25 10:35 PM ET",
+    notes: `ACCURACY BUG FIXES. Five repairs to the factor composites plus one data-wiring upgrade; no calibration changes. (1) NHL PDO now regresses unsustainable puck luck instead of rewarding it: the composite edge reads the PDO differential from the other side, so the luckier team's edge shrinks. (2) NFL WEATHER: bad-weather points no longer enter the directional edge, where they penalized Team A and rewarded Team B purely by argument order; weather still widens variance and suppresses both offenses symmetrically. (3) INJURIES: the basketball composite now reads the live injuryCountFactor (it was reading a legacy key, so its injury factor never fired), and in both basketball and football a healthy side defaults to 1.0 so one-sided injuries register instead of being skipped. (4) BASKETBALL PACE is neutral on directional margin - pace drives total possessions, not who wins; the weight slot is unchanged. (5) TENNIS: the first server in a simulated set is no longer always Player A. (6) NHL DATA: the MoneyPuck table is read live from KV (nhl_moneypuck_v1, refreshed weekly with all 32 teams and goalies), with the embedded table as fallback. Covered by tests/sam-accuracy-fixes.test.js. Untouched: SCORING_MODEL stdDev, shrinkage 0.40, band calibration, league bias, the 80+ cap, the market anchor, grading. Model stays 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: "2026-11-23 10:56 PM ET",
     notes: `NHL CONFIDENCE SHAVE - THE TWO CHANGES FROM TONIGHT'S CALIBRATION BRIEF, APPROVED BY DREW. NHL flipped in the last two weeks: Oct 24-Nov 8 it ran +0.5 against its confidence (n=62); Nov 9-22 it ran -9.5 (n=63). The 70s band is the worst of it - 30-day gap of -20.0 (n=26) - and the 50s band is leaking too, -10.7 over 14 days (n=28). As of this entry, an NHL pick's published confidence takes a down-only shave after band calibration and before the 80+ band cap: 5 points on picks at 70% or above, 3 points on picks in the 50s band. The 60s band is untouched - no shave was approved for it. Floor is 51 and exact-50 is untouched (the 50/50 rule owns it); market-anchor picks still log the market's implied price, set by the logger after this runs. Already-logged picks are unchanged. NCAAB running hot was reported as data only - no upward adjustment, per the down-only rule. Covered by tests/nhl-calibration-shave.test.js. Untouched: shrinkage 0.40, down-only band calibration, the 80+ cap at 79, the 50/50 rule, grading. Model stays 1.7.2.`
   },
@@ -4985,20 +4990,29 @@ function nhlAbbrForTeamName(name) {
   }
   return abbr;
 }
-function nhlMoneypuckForTeamName(name) {
-  if (typeof NHL_MONEYPUCK === "undefined" || !NHL_MONEYPUCK || !NHL_MONEYPUCK.teams) return null;
+var _nhlMoneypuckCache = { at: 0, table: null };
+async function getNhlMoneypuckTable(env) {
+  const live = await kvStatTable(env, "nhl_moneypuck_v1", _nhlMoneypuckCache,
+    (t) => t && t.teams && typeof t.teams === "object" && Object.keys(t.teams).length >= 16);
+  if (live) return live;
+  return (typeof NHL_MONEYPUCK !== "undefined") ? NHL_MONEYPUCK : null;
+}
+function nhlMoneypuckForTeamName(name, table) {
+  const T = table || ((typeof NHL_MONEYPUCK !== "undefined") ? NHL_MONEYPUCK : null);
+  if (!T || !T.teams) return null;
   const abbr = nhlAbbrForTeamName(name);
   if (!abbr) return null;
-  return NHL_MONEYPUCK.teams[abbr] || null;
+  return T.teams[abbr] || null;
 }
 // GSAx per game for a goalie by (normalized) name, preferring the same-team
 // row when the team is known. Table rows are gp-descending, so the first
 // name match is the biggest sample. Returns null when unverifiable.
-function nhlGsaxForGoalie(name, teamName) {
-  if (!name || typeof NHL_MONEYPUCK === "undefined" || !NHL_MONEYPUCK || !NHL_MONEYPUCK.goalies) return null;
+function nhlGsaxForGoalie(name, teamName, table) {
+  const T = table || ((typeof NHL_MONEYPUCK !== "undefined") ? NHL_MONEYPUCK : null);
+  if (!name || !T || !T.goalies) return null;
   const q = String(name).toLowerCase().trim().replace(/\s+/g, " ");
   const abbr = nhlAbbrForTeamName(teamName);
-  const rows = NHL_MONEYPUCK.goalies;
+  const rows = T.goalies;
   let row = rows.find((g) => g.name === q) || null;
   if (row && abbr && row.team !== abbr) {
     row = rows.find((g) => g.name === q && g.team === abbr) || null;
@@ -5028,10 +5042,10 @@ function nhlClampEdge(goals) {
 function nhlWeightedCompositeEdge(o) {
   const W = {};
   for (const w of NHL_IMPORTANCE_WEIGHTS) W[w.key] = w.weight;
-  const tA = nhlMoneypuckForTeamName(o.teamA);
-  const tB = nhlMoneypuckForTeamName(o.teamB);
-  const gA = nhlGsaxForGoalie(o.goalieA, o.teamA);
-  const gB = nhlGsaxForGoalie(o.goalieB, o.teamB);
+  const tA = nhlMoneypuckForTeamName(o.teamA, o.moneypuckTable);
+  const tB = nhlMoneypuckForTeamName(o.teamB, o.moneypuckTable);
+  const gA = nhlGsaxForGoalie(o.goalieA, o.teamA, o.moneypuckTable);
+  const gB = nhlGsaxForGoalie(o.goalieB, o.teamB, o.moneypuckTable);
   const bits = [];
   let edge = 0;
   // Early-season shrinkage: thin samples on EITHER side damp the whole edge.
@@ -5064,7 +5078,9 @@ function nhlWeightedCompositeEdge(o) {
       if (Math.abs(c) >= 0.02) bits.push(`Chance creation (iXG/60 ${(tA.ixg60||0).toFixed(2)} vs ${(tB.ixg60||0).toFixed(2)}, primary pts/60 ${(tA.prim60||0).toFixed(2)} vs ${(tB.prim60||0).toFixed(2)})`);
     }
   }
-  add("pdo",   (tA ? tA.pdo : NaN) - (tB ? tB.pdo : NaN),          15.0, 0.40, "PDO",   `${(tA&&tA.pdo||0).toFixed(3)} vs ${(tB&&tB.pdo||0).toFixed(3)}`);
+  // PDO regression: high PDO (>1.000) reflects unsustainable shooting/save luck,
+  // so regress the luckier side downward (B - A instead of A - B).
+  add("pdo",   (tB ? tB.pdo : NaN) - (tA ? tA.pdo : NaN),          15.0, 0.40, "PDO",   `${(tA&&tA.pdo||0).toFixed(3)} vs ${(tB&&tB.pdo||0).toFixed(3)}`);
   // GSAx: goalie-sample shrinkage is separate (goalies accrue slower).
   // Both starters must resolve, otherwise the factor stays neutral AND the
   // legacy save%-based goalie slot is left alone (no half-replacement).
@@ -5428,11 +5444,9 @@ function nbaWeightedCompositeEdge(o) {
     add("threePct", W.threePct, norm(d, 4, 3) * sh, `3P ${(d).toFixed(1)}pp`);
   }
   // ---- 7. Pace (6%) -----------------------------------------------------------
-  // Faster teams get a small edge at home; slower teams on the road. Simplified
-  // to a direct pace differential edge.
+  // Pace is a total-points / possession-count driver, not a directional win edge.
   if (num(pA.pace) != null && num(pB.pace) != null) {
-    const d = pA.pace - pB.pace;
-    add("pace", W.pace, norm(d, 6, 2) * sh, `pace ${d >= 0 ? "+" : ""}${d.toFixed(1)}`);
+    // Intentionally neutral on directional margin.
   }
   // ---- 8. Recent Form (6%) -----------------------------------------------------
   const formA = ctxA && num(ctxA.recentFormDiff);
@@ -5442,9 +5456,13 @@ function nbaWeightedCompositeEdge(o) {
     add("recentForm", W.recentForm, norm(d, 4, 3) * sh, `form ${d >= 0 ? "+" : ""}${d.toFixed(1)}`);
   }
   // ---- 9. Injuries (5%) ---------------------------------------------------------
-  const injA = ctxA && num(ctxA.injuryFactor);
-  const injB = ctxB && num(ctxB.injuryFactor);
-  if (injA != null && injB != null) {
+  // Read live injuryCountFactor (with legacy injuryFactor fallback) and default a
+  // healthy side to 1.0 so one-sided injuries still fire in the composite.
+  const rawInjA = ctxA && (num(ctxA.injuryCountFactor) ?? num(ctxA.injuryFactor));
+  const rawInjB = ctxB && (num(ctxB.injuryCountFactor) ?? num(ctxB.injuryFactor));
+  if (rawInjA != null || rawInjB != null) {
+    const injA = rawInjA != null ? rawInjA : 1;
+    const injB = rawInjB != null ? rawInjB : 1;
     const d = (injA - 1) - (injB - 1);
     add("injuries", W.injuries, norm(d, 0.08, 4) * sh, `inj ${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)}pp`);
   }
@@ -5611,8 +5629,11 @@ function footballWeightedCompositeEdge(o) {
     }
   }
   // ---- 10. Injuries / Player Availability (3%) ---------------------------------------
-  const injA = num(ctxA.injuryCountFactor), injB = num(ctxB.injuryCountFactor);
-  if (injA != null && injB != null) {
+  // Default a healthy side to 1.0 so one-sided injuries fire (the exact case with real edge).
+  const rawInjA = num(ctxA.injuryCountFactor), rawInjB = num(ctxB.injuryCountFactor);
+  if (rawInjA != null || rawInjB != null) {
+    const injA = rawInjA != null ? rawInjA : 1;
+    const injB = rawInjB != null ? rawInjB : 1;
     const d = (injA - 1) - (injB - 1);
     add("injuries", W.injuries, norm(d, 0.10, 4), `inj ${(d * 100).toFixed(1)}pp`);
   }
@@ -5653,16 +5674,19 @@ function footballWeightedCompositeEdge(o) {
     add("rest", W.rest, pts, `rest ${d >= 0 ? "+" : ""}${d.toFixed(0)}d`);
   }
   // ---- 15. Weather (1%) --------------------------------------------------------------------------------
-  // Also widens variance: wind/cold/precip make outcomes less predictable.
+  // Symmetric stadium weather widens variance (addVar) and suppresses both offenses in
+  // calculateLambdaMultiplier; do NOT add negative wPts to directional E (which would
+  // penalize teamA and reward teamB purely by argument order).
   const windA = num(ctxA.windMph), windB = num(ctxB.windMph);
   const tempA = num(ctxA.tempF), tempB = num(ctxB.tempF);
-  if ((windA != null && windA >= 15) || (tempA != null && tempA <= 32)) {
+  const windVal = windA != null ? windA : windB;
+  const tempVal = tempA != null ? tempA : tempB;
+  if ((windVal != null && windVal >= 15) || (tempVal != null && tempVal <= 32)) {
     let wPts = 0;
-    if (windA >= 20) wPts -= 1.0;
-    else if (windA >= 15) wPts -= 0.5;
-    if (tempA <= 20) wPts -= 0.8;
-    else if (tempA <= 32) wPts -= 0.4;
-    add("weather", W.weather, wPts, `weather ${wPts.toFixed(1)}`);
+    if (windVal != null && windVal >= 20) wPts -= 1.0;
+    else if (windVal != null && windVal >= 15) wPts -= 0.5;
+    if (tempVal != null && tempVal <= 20) wPts -= 0.8;
+    else if (tempVal != null && tempVal <= 32) wPts -= 0.4;
     addVar(Math.abs(wPts) * 0.5);
   }
   return { edge: E, bits, varMult };
@@ -9309,7 +9333,7 @@ __name222222222(tennisServeHoldProb, "tennisServeHoldProb");
 __name2222222222(tennisServeHoldProb, "tennisServeHoldProb");
 __name22222222222(tennisServeHoldProb, "tennisServeHoldProb");
 function simulateTennisSet(holdA, holdB, wtaEdge) {
-  let a = 0, b = 0, serverIsA = true;
+  let a = 0, b = 0, serverIsA = Math.random() < 0.5;
   let guard = 0;
   // WTA 12-factor edge banks INSIDE the Monte Carlo loop (UFC pattern): every
   // service game and tiebreak draws against edge-adjusted holds, so the
@@ -10857,10 +10881,12 @@ Weighted 15-factor composite edge (${leader} ${comp.edge >= 0 ? "+" : ""}${comp.
   // composite returns exactly as built 2026-10-01, weights and all.
   if (key === "NHL") {
     try {
+      const moneypuckTable = await getNhlMoneypuckTable(env);
       const comp = nhlWeightedCompositeEdge({
         teamA, teamB,
         goalieA: contextA.nhlGoalieName || null,
         goalieB: contextB.nhlGoalieName || null,
+        moneypuckTable,
       });
       contextA.nhlEdgeGoals = comp.edge / 2;
       contextB.nhlEdgeGoals = -comp.edge / 2;
