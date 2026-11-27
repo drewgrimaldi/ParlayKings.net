@@ -27,6 +27,12 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: '2026-11-27 12:07 PM ET',
+    title: 'HOME ADVANTAGE TUNED, ADMIN KEY HARDENED, TOOL RESULT CACHE',
+    notes: `Home advantage in the sim tuned down: basketball NBA/WNBA +3 to +2.1 and CBB +4 to +3.2; football NFL +2 to +1.8 (CFB unchanged at +2.5). Admin authentication hardened: the ?key= URL parameter is no longer accepted anywhere it was read; admin access is the X-Admin-Key header only. Tool results are cached at the edge for repeat lookups: get_game_schedule 5 minutes, get_injury_report 10 minutes, get_team_roster 30 minutes; simulations are never cached. KV diagnostics: a warning is logged when nfl_epa_v1 or cfb_adv_v1 is missing or invalid in KV and the embedded fallback table is used, instead of failing silently. Test expectations in basketball-fixes.test.js updated to the tuned home-advantage values. Untouched: SCORING_MODEL.stdDev, CONSERVATISM_SHRINKAGE 0.40, band calibration, marketAnchorDecision. Model label stays SAM 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: '2026-11-26 12:40 PM ET',
     title: 'DAILY BOARD SORTED BY START TIME',
     notes: `Display order only. The daily board now lists games in start-time order, earliest first: the member board's picks and locked rows, and the landing page's free picks and slate, all sorted by the start times the board already resolves for each game. Games with no resolved start time keep their previous relative order at the end. Which picks are free, which are locked, and every count are unchanged. Covered by tests/board.test.js start-time checks. Model stays 1.7.2.`
