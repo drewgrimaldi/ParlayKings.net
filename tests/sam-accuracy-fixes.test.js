@@ -68,6 +68,8 @@ const bundle = [
   extractFn('calculateLambdaMultiplier'),
   extractFn('sosShrinkage'),
   extractFn('rosterIrPlayers'),
+  extractFn('isRosterIrDesignated'),
+  extractFn('activeRosterOnly'),
   extractFn('scoreInjuryReport'),
   extractFn('normalizeLeague'),
   extractConst('INJURY_POS_WEIGHTS'),
@@ -229,6 +231,25 @@ function check(name, cond, extra) {
   check('Roster IR merge skips non-IR statuses', !irFound.includes('Weekly Questionable') && !irFound.includes('Healthy Guy'), irFound.join(','));
   const irScored = scoreInjuryReport('Detroit Lions injury report:\n- Aidan Hutchinson (DE): Injured Reserve', 'NFL');
   check('Merged IR line scores as OUT (factor < 1, highlighted)', irScored.factor < 1 && irScored.highlights.some((h) => h.includes('Hutchinson')), JSON.stringify(irScored));
+
+  // 12. Active roster pool (2026-11-27): the pool every consumer sees is the
+  // active roster only. A player carrying an Injured Reserve designation on
+  // his own roster entry is removed entirely — not flagged, not suppressed,
+  // gone — so key-player selection and writeups can never reach him. Non-IR
+  // statuses (Out, Questionable) stay in the pool; their suppression logic
+  // is separate and unchanged.
+  const poolIn = [
+    { displayName: 'Aidan Hutchinson', injuries: [{ status: 'Injured Reserve', date: '2026-11-18T22:02Z' }] },
+    { displayName: 'Cole Kmet', injuries: [{ status: 'Injured Reserve', date: '2026-10-23T21:36Z' }] },
+    { displayName: 'Healthy Guy', injuries: [] },
+    { displayName: 'Weekly Questionable', injuries: [{ status: 'Questionable', date: '2026-11-25T00:00:00Z' }] },
+    { displayName: 'Weekly Out', injuries: [{ status: 'Out', date: '2026-11-25T00:00:00Z' }] },
+    { displayName: 'No Injury Field' },
+  ];
+  const poolOut = activeRosterOnly(poolIn).map((p) => p.displayName);
+  check('Active pool drops IR players entirely (Hutchinson, Kmet)', !poolOut.includes('Aidan Hutchinson') && !poolOut.includes('Cole Kmet') && poolOut.length === 4, poolOut.join(','));
+  check('Active pool keeps healthy + non-IR statuses', poolOut.includes('Healthy Guy') && poolOut.includes('Weekly Questionable') && poolOut.includes('Weekly Out') && poolOut.includes('No Injury Field'), poolOut.join(','));
+  check('isRosterIrDesignated reads only the roster IR tag', isRosterIrDesignated(poolIn[0]) === true && isRosterIrDesignated(poolIn[3]) === false && isRosterIrDesignated(poolIn[5]) === false && isRosterIrDesignated(null) === false, '');
 
   console.log(`sam-accuracy-fixes: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
