@@ -27,6 +27,12 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: '2026-11-27 12:40 PM ET',
+    title: 'INJURED RESERVE MERGE REBUILT - NO DATE WINDOW',
+    notes: `The roster IR merge no longer drops designations older than 21 days. That window was discarding most of the league's injured reserve: measured 2026-11-27, 202 of the 297 players carrying an Injured Reserve designation on club rosters were past 21 days and never reached the injury report - Cole Kmet (IR Oct 23) among them - so grade-time writeups could treat long-term IR players as active. The merge now takes every player whose current roster designation is Injured Reserve, at any date; a player leaves the list only when the designation itself changes (an activation clears the status - verified against the current rosters: players carrying the designation, Jalen Hurts included, are not playing). The official weekly game-status report cannot supply IR names: it never lists injured-reserve players (zero IR designations on the current report), so the club roster designation is the source of record for IR. Covered by sam-accuracy-fixes.test.js checks 11 (recent IR found, long-term IR included, non-IR skipped, merged line scores as OUT). Untouched: SCORING_MODEL.stdDev, CONSERVATISM_SHRINKAGE 0.40, band calibration, marketAnchorDecision. Model label stays SAM 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: '2026-11-27 12:16 PM ET',
     title: 'ADMIN KEY URL PARAMETER RESTORED',
     notes: `isAdminAuthed accepts the admin key as a ?key= URL parameter again, alongside the X-Admin-Key header. The header-only restriction left the admin routes unreachable in practice: there is no separate admin key on file to send as a header, so every key-gated route (autograde trigger, clear-pending, SAM password, feedback list, calibration backfill) refused access. This restores the acceptance the helper had when it was introduced. The key value itself is unchanged (ADMIN_SECRET if set, otherwise SESSION_SECRET), and the constant-time compare is unchanged. Model label stays SAM 1.7.2.`
@@ -3222,13 +3228,23 @@ __name222222(blendMlbPitchingFactors, "blendMlbPitchingFactors");
 __name2222222(blendMlbPitchingFactors, "blendMlbPitchingFactors");
 __name22222222(blendMlbPitchingFactors, "blendMlbPitchingFactors");
 __name222222222(blendMlbPitchingFactors, "blendMlbPitchingFactors");
-// Roster IR extraction (2026-11-26): ESPN's league injury feed drops
-// players a few days after they land on injured reserve - Aidan Hutchinson
-// (IR Nov 18) was absent from the feed on Nov 26 while the model still
-// priced and narrated him as playing. The roster payload keeps the IR
-// status with its date. Only RECENT designations (21 days) merge into the
-// scored report: a player lost months ago is already out of the team's
-// recent stats, so haircutting for him would price his absence twice.
+// Roster IR extraction (rebuilt 2026-11-27): ESPN's league injury feed
+// drops players a few days after they land on injured reserve - Aidan
+// Hutchinson (IR Nov 18) was absent from the feed on Nov 26 while the
+// model still priced and narrated him as playing. The roster payload
+// carries the club's current injured-reserve designation, and that
+// designation - not the date on it - decides eligibility: EVERY player
+// whose roster status is Injured Reserve merges into the scored report,
+// however long he has been out, and a player leaves the list only when
+// his designation itself changes (an activation clears the status).
+// The first version of this merge kept only designations from the last
+// 21 days; measured 2026-11-27, 202 of the league's 297 current IR
+// designations were older than that and were being dropped - Cole Kmet
+// (IR Oct 23) among them - so writeups could treat long-term IR players
+// as active. The official weekly game-status report cannot be the IR
+// source: it never lists injured-reserve players at all (verified on
+// the current report - zero IR designations), so the club roster
+// designation is the record the merge follows.
 function rosterIrPlayers(rosterData, nowMs = Date.now()) {
   const out = [];
   const groups = (rosterData && rosterData.athletes) || [];
@@ -3236,8 +3252,6 @@ function rosterIrPlayers(rosterData, nowMs = Date.now()) {
     for (const a of (g && g.items) || []) {
       const inj = a && Array.isArray(a.injuries) ? a.injuries[0] : null;
       if (!inj || !/injured reserve/i.test(inj.status || "")) continue;
-      const when = inj.date ? Date.parse(inj.date) : NaN;
-      if (isFinite(when) && nowMs - when > 21 * 24 * 3600 * 1000) continue;
       out.push({
         name: a.displayName || a.fullName || a.shortName || "Unknown player",
         pos: (a.position && (a.position.abbreviation || a.position.name)) || "",
@@ -3278,8 +3292,8 @@ async function getInjuryReport({ league, team } = {}, env = null) {
       const detail = inj.details?.detail || inj.shortComment || inj.longComment || inj.type?.detail || "";
       return `- ${name}${pos ? ` (${pos})` : ""}: ${status}${detail ? ` \u2014 ${detail}` : ""}`;
     });
-    // IR MERGE (2026-11-26): add recent injured-reserve designations the
-    // league feed dropped (see rosterIrPlayers). Deduped by name against
+    // IR MERGE (2026-11-26, rebuilt 2026-11-27): add the injured-reserve
+    // designations the league feed dropped (see rosterIrPlayers). Deduped by name against
     // the feed list; appended after the feed lines so they never displace
     // current-week designations. Fail-open: any error leaves the feed
     // report exactly as it was.

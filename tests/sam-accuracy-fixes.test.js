@@ -210,20 +210,22 @@ function check(name, cond, extra) {
 
   // 11. Roster IR merge: the league injury feed drops players days after
   // they land on IR (Hutchinson, IR Nov 18, missing from the Nov 26 feed).
-  // rosterIrPlayers must surface recent IR designations from the roster
-  // payload, skip stale ones (>21 days, already out of the team's stats),
-  // skip non-IR statuses, and the merged line must score as OUT.
-  const NOW = Date.parse('2026-11-26T16:00:00Z');
+  // rosterIrPlayers must surface every current Injured Reserve designation
+  // from the roster payload at ANY date (rebuilt 2026-11-27: the 21-day
+  // window dropped 202 of 297 league designations, Cole Kmet - IR Oct 23 -
+  // among them), skip non-IR statuses, and the merged line must score as OUT.
+  const NOW = Date.parse('2026-11-27T16:00:00Z');
   const fakeRoster = { athletes: [{ position: 'Defense', items: [
     { displayName: 'Aidan Hutchinson', position: { abbreviation: 'DE' }, injuries: [{ status: 'Injured Reserve', date: '2026-11-18T22:02Z' }] },
     { displayName: 'Jack Campbell', position: { abbreviation: 'LB' }, injuries: [{ status: 'Injured Reserve', date: '2026-11-07T22:18Z' }] },
+    { displayName: 'Cole Kmet', position: { abbreviation: 'TE' }, injuries: [{ status: 'Injured Reserve', date: '2026-10-23T21:36Z' }] },
     { displayName: 'Stale Stash', position: { abbreviation: 'WR' }, injuries: [{ status: 'Injured Reserve', date: '2026-09-01T00:00:00Z' }] },
     { displayName: 'Healthy Guy', position: { abbreviation: 'CB' }, injuries: [] },
     { displayName: 'Weekly Questionable', position: { abbreviation: 'S' }, injuries: [{ status: 'Questionable', date: '2026-11-25T00:00:00Z' }] },
   ] }] };
   const irFound = rosterIrPlayers(fakeRoster, NOW).map((p) => p.name);
   check('Roster IR merge finds recent IR players (Hutchinson, Campbell)', irFound.includes('Aidan Hutchinson') && irFound.includes('Jack Campbell'), irFound.join(','));
-  check('Roster IR merge skips stale IR (>21 days)', !irFound.includes('Stale Stash'), irFound.join(','));
+  check('Roster IR merge includes long-term IR (Kmet, IR since Oct 23)', irFound.includes('Cole Kmet') && irFound.includes('Stale Stash'), irFound.join(','));
   check('Roster IR merge skips non-IR statuses', !irFound.includes('Weekly Questionable') && !irFound.includes('Healthy Guy'), irFound.join(','));
   const irScored = scoreInjuryReport('Detroit Lions injury report:\n- Aidan Hutchinson (DE): Injured Reserve', 'NFL');
   check('Merged IR line scores as OUT (factor < 1, highlighted)', irScored.factor < 1 && irScored.highlights.some((h) => h.includes('Hutchinson')), JSON.stringify(irScored));
