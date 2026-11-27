@@ -70,6 +70,8 @@ const bundle = [
   extractFn('rosterIrPlayers'),
   extractFn('isRosterIrDesignated'),
   extractFn('activeRosterOnly'),
+  extractFn('selectTopStories'),
+  extractFn('formatTopStories'),
   extractFn('scoreInjuryReport'),
   extractFn('normalizeLeague'),
   extractConst('INJURY_POS_WEIGHTS'),
@@ -250,6 +252,23 @@ function check(name, cond, extra) {
   check('Active pool drops IR players entirely (Hutchinson, Kmet)', !poolOut.includes('Aidan Hutchinson') && !poolOut.includes('Cole Kmet') && poolOut.length === 4, poolOut.join(','));
   check('Active pool keeps healthy + non-IR statuses', poolOut.includes('Healthy Guy') && poolOut.includes('Weekly Questionable') && poolOut.includes('Weekly Out') && poolOut.includes('No Injury Field'), poolOut.join(','));
   check('isRosterIrDesignated reads only the roster IR tag', isRosterIrDesignated(poolIn[0]) === true && isRosterIrDesignated(poolIn[3]) === false && isRosterIrDesignated(poolIn[5]) === false && isRosterIrDesignated(null) === false, '');
+
+  // 13. Research bundle (2026-11-27): the sim response carries the top
+  // published stories for the matchup, selected from the league news feed —
+  // team-tagged first, then team mentions, newest first, capped. Stories
+  // about neither team never reach the writer.
+  const arts = [
+    { headline: 'Broncos defense peaking at the right time', description: 'Denver has won four straight.', published: '2026-11-27T15:00:00Z', categories: [{ type: 'team', description: 'Denver Broncos' }] },
+    { headline: 'Steelers offense searching for answers', description: 'Pittsburgh has dropped two of three.', published: '2026-11-27T14:00:00Z', categories: [{ type: 'team', description: 'Pittsburgh Steelers' }] },
+    { headline: 'Broncos vs Steelers: what to watch', description: 'AFC playoff stakes in Denver.', published: '2026-11-27T13:00:00Z', categories: [] },
+    { headline: 'Chiefs clinch division', description: 'Kansas City rolls again.', published: '2026-11-27T16:00:00Z', categories: [{ type: 'team', description: 'Kansas City Chiefs' }] },
+    { headline: 'League announces schedule tweak', description: 'No teams involved here.', published: '2026-11-27T16:30:00Z', categories: [] },
+  ];
+  const top = selectTopStories(arts, 'Denver Broncos', 'Pittsburgh Steelers', 5);
+  check('Research selects only stories about the two teams', top.length === 3 && top.every((s) => !/Chiefs|schedule tweak/.test(s.headline)), top.map((s) => s.headline).join(' | '));
+  check('Research ranks the both-teams story first', top[0].headline.includes('Broncos vs Steelers'), top.map((s) => s.headline).join(' | '));
+  check('Research bundle formats with header and lines', formatTopStories(top).startsWith('TOP STORIES') && formatTopStories(top).includes('Broncos defense peaking'), formatTopStories(top).slice(0, 80));
+  check('Research selector is empty-safe', selectTopStories([], 'A', 'B').length === 0 && formatTopStories([]) === '', '');
 
   console.log(`sam-accuracy-fixes: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
