@@ -27,6 +27,12 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: '2026-11-27 3:05 PM ET',
+    title: 'AVAILABILITY POOL - ONLY PLAYERS WHO ARE PLAYING, ALL LEAGUES',
+    notes: `The player pool is now defined by availability for the game, in every league. fetchTeamRosterRaw returns dropUnavailablePlayers(pool): after the league injury statuses are attached to the roster entries, any player whose status is Out is removed entirely, alongside the Injured Reserve removal from earlier today. Questionable and Day-To-Day players stay — they can and do play. This closes the gap in leagues whose roster entries carry no reserve designation (NBA, WNBA, MLB — verified live: their entries carry only Out / Day-To-Day), where an out-for-the-game player previously stayed in the pool the sim picks key players from and the writer writes from. The pool every consumer sees — key-player selection, bundled rosters, writeups — is now exactly the players available to play that game. Untouched: the simulation's injury factors (the report still feeds the math through scoreInjuryReport), SCORING_MODEL.stdDev, CONSERVATISM_SHRINKAGE 0.40, the IR merge, the research bundle. Model label stays SAM 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: '2026-11-27 2:50 PM ET',
     title: 'RESEARCH BUNDLE - TOP STORIES IN EVERY SIM RESPONSE',
     notes: `Every team-sport simulation now researches the matchup before the writeup is written. runMatchupSimulation fetches the league's live ESPN news feed and prepends the top stories for the two teams (new fetchMatchupResearch / selectTopStories / formatTopStories) next to the bundled rosters: team-tagged stories first, then stories mentioning either side, newest first, capped at five, fail-open so a news outage never blocks a sim. The system prompt now directs the writer to build the matchup setup and the breakdown's storylines from those stories — form, streaks, stakes — combined with the simulation's numbers, and never to invent a storyline the research and data do not contain. Rule 9's leftover instruction to 'briefly note the injury' is removed: injuries move the numbers only and are never noted in the reply, consistent with the no-mentions hard rule. Untouched: the simulation itself, injury factors, the IR merge, the active-roster pool, SCORING_MODEL.stdDev, CONSERVATISM_SHRINKAGE 0.40. Model label stays SAM 1.7.2.`
@@ -3279,6 +3285,22 @@ function activeRosterOnly(players) {
   if (!Array.isArray(players)) return players;
   return players.filter((p) => !isRosterIrDesignated(p));
 }
+function isPlayerOutStatus(athlete) {
+  const inj = athlete && Array.isArray(athlete.injuries) ? athlete.injuries[0] : null;
+  return !!(inj && /^\s*out\s*$/i.test(inj.status || ""));
+}
+function dropUnavailablePlayers(players) {
+  // AVAILABILITY POOL (2026-11-27, Drew's order): a player who is not
+  // playing is not in the pool — for any league. Runs AFTER
+  // attachRosterInjuries has put the league report's statuses onto the
+  // roster entries: Injured Reserve and Out are both removed entirely.
+  // Questionable and Day-To-Day stay — those players can and do play.
+  // This is what makes the pool the players available for THIS game in
+  // leagues whose roster entries carry no reserve designation (NBA,
+  // WNBA, MLB), not just the NFL/NHL where IR exists.
+  if (!Array.isArray(players)) return players;
+  return players.filter((p) => !isRosterIrDesignated(p) && !isPlayerOutStatus(p));
+}
 function rosterIrPlayers(rosterData, nowMs = Date.now()) {
   const out = [];
   const groups = (rosterData && rosterData.athletes) || [];
@@ -3888,7 +3910,7 @@ async function fetchTeamRosterRaw(league, team, env = null) {
     } catch (err) {
       console.error(`Roster injury attach failed for "${team}" (${league}):`, err.message);
     }
-    return { team: matched, players: pool, sportPath: path };
+    return { team: matched, players: dropUnavailablePlayers(pool), sportPath: path };
   } catch (err) {
     console.error(`fetchTeamRosterRaw failed for "${team}" (${league}):`, err.message);
     return null;

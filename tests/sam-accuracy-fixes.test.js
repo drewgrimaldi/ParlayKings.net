@@ -72,6 +72,8 @@ const bundle = [
   extractFn('activeRosterOnly'),
   extractFn('selectTopStories'),
   extractFn('formatTopStories'),
+  extractFn('isPlayerOutStatus'),
+  extractFn('dropUnavailablePlayers'),
   extractFn('scoreInjuryReport'),
   extractFn('normalizeLeague'),
   extractConst('INJURY_POS_WEIGHTS'),
@@ -269,6 +271,23 @@ function check(name, cond, extra) {
   check('Research ranks the both-teams story first', top[0].headline.includes('Broncos vs Steelers'), top.map((s) => s.headline).join(' | '));
   check('Research bundle formats with header and lines', formatTopStories(top).startsWith('TOP STORIES') && formatTopStories(top).includes('Broncos defense peaking'), formatTopStories(top).slice(0, 80));
   check('Research selector is empty-safe', selectTopStories([], 'A', 'B').length === 0 && formatTopStories([]) === '', '');
+
+  // 14. Availability pool (2026-11-27): after injury statuses are attached,
+  // a player who is not playing is out of the pool in EVERY league — Out
+  // joins Injured Reserve as a full removal. Questionable and Day-To-Day
+  // stay: those players can play.
+  const availIn = [
+    { displayName: 'Out Star', injuries: [{ status: 'Out' }] },
+    { displayName: 'IR Guy', injuries: [{ status: 'Injured Reserve' }] },
+    { displayName: 'Questionable Wing', injuries: [{ status: 'Questionable' }] },
+    { displayName: 'DTD Guard', injuries: [{ status: 'Day-To-Day' }] },
+    { displayName: 'Healthy Starter', injuries: [] },
+    { displayName: 'No Field' },
+  ];
+  const availOut = dropUnavailablePlayers(availIn).map((p) => p.displayName);
+  check('Availability pool drops Out and IR', !availOut.includes('Out Star') && !availOut.includes('IR Guy') && availOut.length === 4, availOut.join(','));
+  check('Availability pool keeps Questionable, Day-To-Day, healthy', availOut.includes('Questionable Wing') && availOut.includes('DTD Guard') && availOut.includes('Healthy Starter') && availOut.includes('No Field'), availOut.join(','));
+  check('isPlayerOutStatus matches only exact Out', isPlayerOutStatus(availIn[0]) === true && isPlayerOutStatus(availIn[2]) === false && isPlayerOutStatus(availIn[5]) === false && isPlayerOutStatus(null) === false, '');
 
   console.log(`sam-accuracy-fixes: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
