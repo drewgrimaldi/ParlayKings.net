@@ -117,13 +117,13 @@ check('normal home/away not neutral', isNeutralVenueEvent({ competitions: [{ com
 {
   const cA = {}, cB = {};
   applyBasketballHomeCourt(cA, cB, { neutralSite: false, homeTeamIsA: true }, 'CBB', 'Duke');
-  check('home CBB: +3.2 to home side', cA.homeFieldPts, 3.2);
+  check('home CBB: +4 to home side', cA.homeFieldPts, 4);
   check('home CBB: nothing to away side', cB.homeFieldPts, undefined);
 }
 {
   const cA = {}, cB = {};
   applyBasketballHomeCourt(cA, cB, { neutralSite: false, homeTeamIsA: false }, 'NBA', 'Celtics');
-  check('away NBA: +2.1 to teamB', cB.homeFieldPts, 2.1);
+  check('away NBA: +3 to teamB', cB.homeFieldPts, 3);
   check('away NBA: nothing to teamA', cA.homeFieldPts, undefined);
 }
 

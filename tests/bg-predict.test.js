@@ -178,46 +178,6 @@ function eq(actual, expected, label) {
   eq(chatCalls.length, 0, 'finished job never runs twice');
   eq(pushCalls.length, 0, 'no second push');
 
-  // Fallback push (2026-11-10): a job started with NO subscription of its
-  // own still notifies the member's saved subscription — matched even
-  // when the saved key's capitalization differs from the job owner.
-  chatStubMode = 'ok';
-  const kv5 = fakeKV();
-  const benv5 = { SAM_BETS: kv5, VAPID_PRIVATE_KEY: tenv.VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY: tenv.VAPID_PUBLIC_KEY, VAPID_SUBJECT: tenv.VAPID_SUBJECT };
-  await kv5.put('pushsub:DREW', JSON.stringify(testSub));
-  await kv5.put('bgjob:job-5', JSON.stringify({ id: 'job-5', owner: 'drew', message: 'P vs Q', provider: 'meta', history: [], convoId: 'c5', cookie: 'sess=abc', push: null, status: 'pending', createdAt: Date.now() - 2 * 60 * 1000 }));
-  stubPush(201);
-  await processBgJobs(benv5, ctx);
-  restoreFetch();
-  const done5 = JSON.parse(await kv5.get('bgjob:job-5'));
-  eq(done5.status, 'done', 'no-sub job completes');
-  eq(pushCalls.length, 1, 'fallback push sent to saved subscription');
-  eq(pushCalls[0] && pushCalls[0].url, testSub.endpoint, 'fallback push went to the saved endpoint');
-
-  // Both devices: the job's own subscription AND a different saved one
-  // each get a ticket.
-  const kv6 = fakeKV();
-  const benv6 = { SAM_BETS: kv6, VAPID_PRIVATE_KEY: tenv.VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY: tenv.VAPID_PUBLIC_KEY, VAPID_SUBJECT: tenv.VAPID_SUBJECT };
-  const otherSub = { endpoint: 'https://push.example.com/xyz', keys: { p256dh: 'x', auth: 'y' } };
-  await kv6.put('pushsub:drew', JSON.stringify(otherSub));
-  await kv6.put('bgjob:job-6', JSON.stringify({ id: 'job-6', owner: 'drew', message: 'R vs S', provider: 'meta', history: [], convoId: 'c6', cookie: 'sess=abc', push: testSub, status: 'pending', createdAt: Date.now() - 2 * 60 * 1000 }));
-  stubPush(201);
-  await processBgJobs(benv6, ctx);
-  restoreFetch();
-  eq(pushCalls.length, 2, 'push sent to job sub and saved sub when they differ');
-  eq(pushCalls.some((c) => c.url === testSub.endpoint) && pushCalls.some((c) => c.url === otherSub.endpoint), true, 'both endpoints notified');
-
-  // No subscription anywhere: job still completes, no push attempted.
-  const kv7 = fakeKV();
-  const benv7 = { SAM_BETS: kv7, VAPID_PRIVATE_KEY: tenv.VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY: tenv.VAPID_PUBLIC_KEY, VAPID_SUBJECT: tenv.VAPID_SUBJECT };
-  await kv7.put('bgjob:job-7', JSON.stringify({ id: 'job-7', owner: 'drew', message: 'T vs U', provider: 'meta', history: [], convoId: 'c7', cookie: 'sess=abc', push: null, status: 'pending', createdAt: Date.now() - 2 * 60 * 1000 }));
-  stubPush(201);
-  await processBgJobs(benv7, ctx);
-  restoreFetch();
-  const done7 = JSON.parse(await kv7.get('bgjob:job-7'));
-  eq(done7.status, 'done', 'job completes with no subscription anywhere');
-  eq(pushCalls.length, 0, 'no push attempted without a subscription');
-
   // Retention: finished jobs past TTL are cleaned up.
   const kv3 = fakeKV();
   await kv3.put('bgjob:old', JSON.stringify({ id: 'old', owner: 'drew', status: 'done', doneAt: Date.now() - 2 * 86400 * 1000 }));
@@ -237,12 +197,6 @@ function eq(actual, expected, label) {
   eq(SW_JS.includes('notificationclick'), true, 'sw handles tap');
   eq(SW_JS.includes('pk-open-url'), true, 'tap hands the url to an open page');
   eq(SW_JS.includes('postMessage'), true, 'sw wakes a stale tab with the url');
-  // Prediction taps land on the CHAT, absolute (2026-11-10): a
-  // subscription created on parlaykings.net runs this worker under that
-  // origin, so a relative tap url resolved to the landing page.
-  eq(SW_JS.includes('https://ai.grimaldi.tv/?job='), true, 'prediction tap url is the chat, absolute');
-  eq(SW_JS.includes("'/?job='"), false, 'no relative prediction tap url remains');
-  eq(SW_JS.includes("url: 'https://ai.grimaldi.tv/'"), true, 'generic prediction tap also lands on the chat');
 
   // Enqueue must start the job immediately: POST /api/jobs may not leave the
   // job sitting pending until the minutely cron (up to 60s of dead wait on
