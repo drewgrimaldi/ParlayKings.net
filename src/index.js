@@ -3614,11 +3614,11 @@ function applyBasketballHomeCourt(contextA, contextB, homeAway, key, homeTeamNam
     return `
 Neutral-venue game in the sim: no home-court advantage awarded to either side.`;
   }
-  const hfa = key === "CBB" ? 4 : 3;
+  const hfa = key === "CBB" ? 3.2 : 2.1;
   if (homeAway.homeTeamIsA) contextA.homeFieldPts = hfa;
   else contextB.homeFieldPts = hfa;
   return `
-Home-court advantage in the sim: ${homeTeamName} gets +${hfa} expected points (NBA/WNBA +3 / CBB +4).`;
+Home-court advantage in the sim: ${homeTeamName} gets +${hfa} expected points (NBA/WNBA +2.1 / CBB +3.2).`;
 }
 __name(applyBasketballHomeCourt, "applyBasketballHomeCourt");
 async function getHomeAwayContext(sportPath, teamA, teamB, eventDate, env = null) {
@@ -3937,7 +3937,7 @@ __name22222222222(sampleBivariatePoisson, "sampleBivariatePoisson");
 function isAdminAuthed(request, url, env) {
   const expected = env.ADMIN_SECRET || env.SESSION_SECRET;
   if (!expected) return false;
-  const provided = request.headers.get("X-Admin-Key") || url.searchParams.get("key") || "";
+  const provided = request.headers.get("X-Admin-Key") || "";
   if (provided.length !== expected.length) return false;
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
@@ -5306,12 +5306,14 @@ async function getNflEpaTable(env) {
   const live = await kvStatTable(env, "nfl_epa_v1", _nflEpaCache,
     (t) => t && typeof t === "object" && Object.keys(t).length === 32);
   if (live) return live;
+  console.warn("[kv-stat] nfl_epa_v1 missing or invalid in KV; using embedded fallback");
   return (typeof NFL_TEAM_EPA !== "undefined") ? NFL_TEAM_EPA : null;
 }
 async function getCfbAdvTable(env) {
   const live = await kvStatTable(env, "cfb_adv_v1", _cfbAdvCache,
     (t) => t && t.teams && typeof t.teams === "object" && Object.keys(t.teams).length === 138);
   if (live) return live;
+  console.warn("[kv-stat] cfb_adv_v1 missing or invalid in KV; using embedded fallback");
   return (typeof CFB_TEAM_ADV !== "undefined") ? CFB_TEAM_ADV : null;
 }
 // Per-factor clamp: no single factor may contribute more than +/-6 expected
@@ -10517,11 +10519,11 @@ Injury reports factored directly into this simulation's expected output (positio
       contextB.travelTier = homeAway.travelTierB;
       const homeTeamName = homeAway.homeTeamIsA ? teamA : teamB;
       if (key === "NFL" || key === "CFB") {
-        const hfa = key === "NFL" ? 2 : 2.5;
+        const hfa = key === "NFL" ? 1.8 : 2.5;
         if (homeAway.homeTeamIsA) contextA.homeFieldPts = hfa;
         else contextB.homeFieldPts = hfa;
         homeFieldLine = `
-Home-field advantage in the sim: ${homeTeamName} gets +${hfa} expected points (NFL +2 / CFB +2.5), on top of travel.`;
+Home-field advantage in the sim: ${homeTeamName} gets +${hfa} expected points (NFL +1.8 / CFB +2.5), on top of travel.`;
       } else if (key === "NBA" || key === "WNBA" || key === "CBB") {
         // Neutral-venue guard + home-court assignment (Drew's call 2026-09-23):
         // a neutral game previously fell through as "teamB is home" and handed
@@ -11651,12 +11653,30 @@ __name222222222(runMatchupSimulation, "runMatchupSimulation");
 __name2222222222(runMatchupSimulation, "runMatchupSimulation");
 __name22222222222(runMatchupSimulation, "runMatchupSimulation");
 async function runTool(name, args, env, provider) {
-  if (name === "get_game_schedule") return await getGameSchedule(args || {}, env);
-  if (name === "get_injury_report") return await getInjuryReport(args || {}, env);
-  if (name === "get_team_roster") return await getTeamRoster(args || {}, env);
-  if (name === "run_matchup_simulation") return await runMatchupSimulation(args || {}, env, provider);
-  if (name === "run_field_simulation") return await runFieldSimulation(args || {}, env);
-  return "Unknown tool.";
+  const ttlMap = { get_game_schedule: 300, get_injury_report: 600, get_team_roster: 1800 };
+  const ttl = ttlMap[name] || 0;
+  let cacheKey = null;
+  if (ttl > 0 && typeof caches !== "undefined" && caches.default) {
+    try {
+      const sortedArgs = JSON.stringify(args || {}, Object.keys(args || {}).sort());
+      cacheKey = new Request("https://sam-tool-cache.internal/" + encodeURIComponent(name) + "?a=" + encodeURIComponent(sortedArgs));
+      const hit = await caches.default.match(cacheKey);
+      if (hit) return await hit.text();
+    } catch (e) { cacheKey = null; }
+  }
+  let res;
+  if (name === "get_game_schedule") res = await getGameSchedule(args || {}, env);
+  else if (name === "get_injury_report") res = await getInjuryReport(args || {}, env);
+  else if (name === "get_team_roster") res = await getTeamRoster(args || {}, env);
+  else if (name === "run_matchup_simulation") return await runMatchupSimulation(args || {}, env, provider);
+  else if (name === "run_field_simulation") return await runFieldSimulation(args || {}, env);
+  else return "Unknown tool.";
+  if (cacheKey && typeof res === "string" && res.length > 20 && !/^error/i.test(res.trim())) {
+    try {
+      await caches.default.put(cacheKey, new Response(res, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=" + ttl } }));
+    } catch (e) {}
+  }
+  return res;
 }
 __name(runTool, "runTool");
 __name2(runTool, "runTool");
@@ -11911,23 +11931,29 @@ async function callMeta(apiKey, message, env) {
   while (toolCalls.length > 0 && hops < 6) {
     hops++;
     messages.push({ role: "assistant", content: choice.content || "", tool_calls: toolCalls });
-    for (const call of toolCalls) {
+    const callResults = await Promise.all(toolCalls.map(async (call) => {
       const { name, arguments: rawArgs } = call.function;
       let args = {};
       try {
         args = rawArgs ? JSON.parse(rawArgs) : {};
       } catch (e) {
-        messages.push({ role: "tool", tool_call_id: call.id, content: "ERROR: tool arguments were not valid JSON (" + e.message + "). Retry this call with corrected arguments; do not guess at results." });
-        continue;
+        return { call, name, args: null, error: "ERROR: tool arguments were not valid JSON (" + e.message + "). Retry this call with corrected arguments; do not guess at results." };
       }
       const toolResult = await runTool(name, args, env, "meta");
-      if (name === "run_matchup_simulation" || name === "run_field_simulation") {
-        thoughts.push(` ${name} executed \u2014 args: ${JSON.stringify(args)}
-${toolResult}`);
-        const parsed = parseSimulationSplit(toolResult);
+      return { call, name, args, toolResult };
+    }));
+    for (const r of callResults) {
+      if (r.error) {
+        messages.push({ role: "tool", tool_call_id: r.call.id, content: r.error });
+        continue;
+      }
+      if (r.name === "run_matchup_simulation" || r.name === "run_field_simulation") {
+        thoughts.push(` ${r.name} executed \u2014 args: ${JSON.stringify(r.args)}
+${r.toolResult}`);
+        const parsed = parseSimulationSplit(r.toolResult);
         if (parsed) lastSim = parsed;
       }
-      messages.push({ role: "tool", tool_call_id: call.id, content: toolResult });
+      messages.push({ role: "tool", tool_call_id: r.call.id, content: r.toolResult });
     }
     const overBudget = Date.now() - metaStartedAt > META_BUDGET_MS;
     response = await requestMeta(apiKey, messages, overBudget);
@@ -12856,27 +12882,41 @@ async function fetchTheOddsApiData(env, pick) {
       }
     }
     if (!bestEvent) return null;
-    const preferred = ["draftkings", "fanduel", "betmgm", "caesars"];
-    let bookmaker = bestEvent.bookmakers?.find((b) => preferred.includes(b.key)) || bestEvent.bookmakers?.[0];
-    if (!bookmaker) return null;
-    const h2h = bookmaker.markets?.find((m) => m.key === "h2h");
-    if (!h2h || !h2h.outcomes) return null;
-    const outcomes = h2h.outcomes;
-    const winnerOutcome = outcomes.find((o) => oddsNameMatches(o.name, pickWinner) || norm(o.name).includes(pickWinner) || pickWinner.includes(norm(o.name)));
-    const otherOutcome = outcomes.find((o) => o !== winnerOutcome);
-    if (!winnerOutcome) return null;
     const toImplied = /* @__PURE__ */ __name22222222222((american) => {
       const n = parseInt(american, 10);
       if (isNaN(n)) return null;
       return n < 0 ? Math.round(-n / (-n + 100) * 100) : Math.round(100 / (n + 100) * 100);
     }, "toImplied");
+    const medianNum = (arr) => {
+      const s = arr.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+      if (!s.length) return null;
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+    };
+    const allBooks = Array.isArray(bestEvent.bookmakers) ? bestEvent.bookmakers : [];
+    const quotes = [];
+    for (const bk of allBooks) {
+      const m = bk.markets?.find((mk) => mk.key === "h2h");
+      if (!m || !Array.isArray(m.outcomes)) continue;
+      const wOut = m.outcomes.find((o) => oddsNameMatches(o.name, pickWinner) || norm(o.name).includes(pickWinner) || pickWinner.includes(norm(o.name)));
+      const oOut = m.outcomes.find((o) => o !== wOut);
+      if (!wOut) continue;
+      const wImp = toImplied(wOut.price);
+      const oImp = oOut ? toImplied(oOut.price) : null;
+      if (wImp != null) quotes.push({ key: bk.key, title: bk.title, wPrice: wOut.price, wImp, oName: oOut?.name || "opponent", oPrice: oOut?.price ?? null, oImp });
+    }
+    if (!quotes.length) return null;
+    const sharpPref = ["pinnacle", "circa", "draftkings", "fanduel", "betmgm", "caesars"];
+    const refQuote = quotes.find((q) => sharpPref.includes(q.key)) || quotes[0];
+    const consWImp = medianNum(quotes.map((q) => q.wImp));
+    const consOImp = medianNum(quotes.map((q) => q.oImp));
     return {
-      bookmakerTitle: bookmaker.title,
-      winnerPrice: winnerOutcome.price,
-      winnerImplied: toImplied(winnerOutcome.price),
-      otherName: otherOutcome?.name || "opponent",
-      otherPrice: otherOutcome?.price ?? null,
-      otherImplied: otherOutcome ? toImplied(otherOutcome.price) : null
+      bookmakerTitle: quotes.length > 1 ? `Market Consensus (${quotes.length} books)` : refQuote.title,
+      winnerPrice: refQuote.wPrice,
+      winnerImplied: consWImp ?? refQuote.wImp,
+      otherName: refQuote.oName,
+      otherPrice: refQuote.oPrice,
+      otherImplied: consOImp ?? refQuote.oImp
     };
   } catch (err) {
     console.error("fetchTheOddsApiData failed:", err.message);
@@ -15020,6 +15060,9 @@ async function _logBetToAirtableInner(env, pick, originalQuestion, provider, bet
           if (_snap && _snap.otherImplied == null && Number.isFinite(_snap.otherPrice)) {
             _snap.otherImplied = americanToImplied(_snap.otherPrice);
           }
+          if (!_snap && pick._marketOdds && shadowBookQualityOk(pick._marketOdds)) {
+            _snap = pick._marketOdds;
+          }
         }
         // Team-name guard (2026-11-06): if the chosen snapshot names
         // an other side that is not this matchup's other team, the
@@ -15589,6 +15632,8 @@ function fitBandCalibration(records, opts = {}) {
     { label: "90%+", min: 0.9, max: 1.01 }
   ].map((b) => ({ ...b, wins: 0, losses: 0 }));
   let totalGraded = 0;
+  const nowMs = Date.now();
+  const halfLifeDays = opts.halfLifeDays || 30;
   for (const r of records) {
     const f = r.fields || {};
     const result = (f["Result"] || "").toLowerCase();
@@ -15597,8 +15642,11 @@ function fitBandCalibration(records, opts = {}) {
     if (typeof conf !== "number") continue;
     const bucket = buckets.find((b) => conf >= b.min && conf < b.max);
     if (!bucket) continue;
-    if (result === "win") bucket.wins++;
-    else bucket.losses++;
+    const evMs = Date.parse(String(f["Event Date"] || f["Placed Date"] || ""));
+    const ageDays = Number.isFinite(evMs) ? Math.max(0, (nowMs - evMs) / 86400000) : 0;
+    const weight = Number.isFinite(evMs) ? Math.max(0.15, Math.pow(0.5, ageDays / halfLifeDays)) : 1;
+    if (result === "win") bucket.wins += weight;
+    else bucket.losses += weight;
     totalGraded++;
   }
   if (totalGraded < 20) return null;
@@ -19886,13 +19934,24 @@ async function vapidAuthHeader(env, audience) {
 }
 __name(vapidAuthHeader, "vapidAuthHeader");
 async function sendPushTicket(env, sub) {
-  const aud = new URL(sub.endpoint).origin;
-  const auth = await vapidAuthHeader(env, aud);
-  const res = await fetch(sub.endpoint, {
-    method: "POST",
-    headers: { "Authorization": auth, "TTL": "86400", "Urgency": "normal", "Content-Length": "0" }
-  });
-  return res.status;
+  const list = Array.isArray(sub && sub.devices) && sub.devices.length > 0
+    ? sub.devices.filter((d) => d && d.endpoint)
+    : (sub && sub.endpoint ? [sub] : []);
+  if (list.length === 0) return 410;
+  const results = await Promise.allSettled(list.map(async (d) => {
+    const aud = new URL(d.endpoint).origin;
+    const auth = await vapidAuthHeader(env, aud);
+    const res = await fetch(d.endpoint, {
+      method: "POST",
+      headers: { "Authorization": auth, "TTL": "86400", "Urgency": "normal", "Content-Length": "0" }
+    });
+    return res.status;
+  }));
+  const statuses = results.map((r) => r.status === "fulfilled" ? r.value : 500);
+  const ok = statuses.find((s) => s >= 200 && s < 300);
+  if (ok) return ok;
+  if (statuses.every((s) => s === 404 || s === 410)) return 410;
+  return statuses[0] || 500;
 }
 __name(sendPushTicket, "sendPushTicket");
 // v1 notification dispatcher. Single choke point for all alert pushes:
@@ -20775,6 +20834,7 @@ async function checkRecordMovement(env, kv, rec, users, colsOk) {
   const moveHr = prev && Number.isFinite(Number(prev.price)) ? cur - Number(prev.price) : 0;
   const hoursSince = prev && prev.t ? (Date.now() - Number(prev.t)) / 3600000 : 99;
   try { await kv.put(`linemove:${rec.id}`, JSON.stringify({ t: Date.now(), price: cur }), { expirationTtl: 86400 }); } catch (err) {}
+  try { await kv.put(`clv:${rec.id}`, JSON.stringify({ t: Date.now(), matchup: pick.matchup, league: pick.league, loggedPrice: logged, closingPrice: cur, closingImplied: line.winnerImplied ?? null, moveCents: logged != null ? cur - logged : null }), { expirationTtl: 2592000 }); } catch (err) {}
   if (colsOk === "ok") {
     const patch = {};
     if (logged == null) patch[LINE_COL_LOGGED] = cur;
@@ -21274,10 +21334,12 @@ __name(runFollowAlertChecks, "runFollowAlertChecks");
 async function runAlertPass(env) {
   const kv = replicaKv(env);
   if (!kv) return;
-  try { await runNightlyRecaps(env, kv); } catch (err) { console.error("recap pass failed:", err.message); }
-  try { await runLineMoveChecks(env, kv); } catch (err) { console.error("linemove pass failed:", err.message); }
-  try { await runGameAlertChecks(env, kv); } catch (err) { console.error("gamealert pass failed:", err.message); }
-  try { await runFollowAlertChecks(env, kv); } catch (err) { console.error("followalert pass failed:", err.message); }
+  await Promise.allSettled([
+    runNightlyRecaps(env, kv).catch((err) => console.error("recap pass failed:", err.message)),
+    runLineMoveChecks(env, kv).catch((err) => console.error("linemove pass failed:", err.message)),
+    runGameAlertChecks(env, kv).catch((err) => console.error("gamealert pass failed:", err.message)),
+    runFollowAlertChecks(env, kv).catch((err) => console.error("followalert pass failed:", err.message))
+  ]);
   try { await runPickHoldRelease(env, kv); } catch (err) { console.error("pick hold release failed:", err.message); }
   try { await runDripQueue(env, kv); } catch (err) { console.error("drip pass failed:", err.message); }
   try { await flushAlertBundles(env, kv); } catch (err) { console.error("bundle flush failed:", err.message); }
@@ -21577,11 +21639,27 @@ var ai_worker_current_default = {
   // model base (Meta / SAM 1.6) whose games have finished on ESPN.
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      await processBgJobs(env, ctx);
-      await gradeAllModelBets(env);
-      await seedBetsReplicaFromAirtable(env);
-      try { const startRecs = await loadBetsReplica(env); if (Array.isArray(startRecs)) await resolvePickStarts(env, startRecs); } catch (e) {}
-      await runAlertPass(env);
+      try { await processBgJobs(env, ctx); } catch (e) { console.error("[cron] processBgJobs failed:", e); }
+      try { await gradeAllModelBets(env); } catch (e) { console.error("[cron] gradeAllModelBets failed:", e); }
+      try { await seedBetsReplicaFromAirtable(env); } catch (e) { console.error("[cron] seedBetsReplicaFromAirtable failed:", e); }
+      try {
+        const startRecs = await loadBetsReplica(env);
+        if (Array.isArray(startRecs)) {
+          await resolvePickStarts(env, startRecs);
+          const cutoffMs = Date.now() - 48 * 3600 * 1000;
+          const overdue = startRecs.filter((r) => {
+            const f = r && r.fields ? r.fields : r || {};
+            const res = String(f.Result || f.result || "").trim().toLowerCase();
+            if (res && res !== "pending") return false;
+            const d = Date.parse(String(f["Event Date"] || f.eventDate || ""));
+            return Number.isFinite(d) && d < cutoffMs;
+          });
+          if (overdue.length > 0) {
+            console.warn(`[overdue-pending] ${overdue.length} pending pick(s) >48h past Event Date:`, overdue.slice(0, 10).map((r) => r.id || (r.fields && r.fields["Bet Label"])));
+          }
+        }
+      } catch (e) { console.error("[cron] resolvePickStarts/overdue check failed:", e); }
+      try { await runAlertPass(env); } catch (e) { console.error("[cron] runAlertPass failed:", e); }
     })());
   },
   async fetch(request, env, ctx) {
@@ -21673,11 +21751,38 @@ var ai_worker_current_default = {
         return new Response(JSON.stringify({ error: "Bad subscription." }), { status: 400, headers: { "Content-Type": "application/json" } });
       }
       try {
-        await subKv.put(pushSubKey(subOwner), JSON.stringify({ endpoint: sub.endpoint.slice(0, 500), keys: { p256dh: sub.keys.p256dh.slice(0, 200), auth: sub.keys.auth.slice(0, 100) } }), { expirationTtl: PUSH_SUB_TTL });
+        const clean = { endpoint: sub.endpoint.slice(0, 500), keys: { p256dh: sub.keys.p256dh.slice(0, 200), auth: sub.keys.auth.slice(0, 100) } };
+        let existing = [];
+        try {
+          const prevRaw = await subKv.get(pushSubKey(subOwner));
+          const prev = prevRaw ? JSON.parse(prevRaw) : null;
+          if (prev && Array.isArray(prev.devices)) existing = prev.devices;
+          else if (prev && prev.endpoint) existing = [prev];
+        } catch (e) {}
+        const merged = [clean, ...existing.filter((d) => d && d.endpoint && d.endpoint !== clean.endpoint)].slice(0, 5);
+        await subKv.put(pushSubKey(subOwner), JSON.stringify({ endpoint: clean.endpoint, keys: clean.keys, devices: merged }), { expirationTtl: PUSH_SUB_TTL });
       } catch (err) {
         return new Response(JSON.stringify({ error: "Could not save subscription." }), { status: 500, headers: { "Content-Type": "application/json" } });
       }
       return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+    }
+    if (url.pathname === "/api/push-test" && request.method === "POST") {
+      const testOwner = bgJobOwner(await getSession(request, env));
+      if (!testOwner) return new Response(JSON.stringify({ error: "Sign in to test notifications." }), { status: 401, headers: { "Content-Type": "application/json" } });
+      const testKv = replicaKv(env);
+      if (!testKv) return new Response(JSON.stringify({ error: "Notifications unavailable." }), { status: 500, headers: { "Content-Type": "application/json" } });
+      let testSub = null;
+      try { const rawSub = await testKv.get(pushSubKey(testOwner)); testSub = rawSub ? JSON.parse(rawSub) : null; } catch (e) {}
+      if (!testSub || !testSub.endpoint) return new Response(JSON.stringify({ ok: false, error: "No active push subscription found." }), { status: 404, headers: { "Content-Type": "application/json" } });
+      const testEntry = { id: "test:" + Date.now(), type: "announcement", title: "ParlayKings Test Alert", body: "Notifications are working on this device.", url: "/", at: Date.now() };
+      try {
+        const q = await loadAlertQueue(testKv, testOwner);
+        q.push(testEntry);
+        await saveAlertQueue(testKv, testOwner, q);
+      } catch (e) {}
+      const status = await sendPushTicket(env, testSub);
+      const count = Array.isArray(testSub.devices) ? testSub.devices.length : 1;
+      return new Response(JSON.stringify({ ok: status >= 200 && status < 300, status, devices: count }), { headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/jobs" && request.method === "POST") {
       const jobSession = await getSession(request, env);
@@ -22246,13 +22351,13 @@ ${urls.map((p) => `  <url><loc>https://parlaykings.net${p === "/" ? "/" : p}</lo
       if (!isAdminAuthed(request, url, env)) return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
       const result = await gradeAllModelBets(env);
       return new Response(JSON.stringify({ ok: true, result }, null, 2), {
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        headers: { "Content-Type": "application/json" }
       });
     }
     if ((url.pathname === "/admin/clear-pending-mlb" || url.pathname === "/api/clear-pending-mlb") && request.method === "GET") {
       if (!isAdminAuthed(request, url, env)) return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
       const summary = await clearPendingMLBBets(env);
-      return new Response(JSON.stringify({ ok: true, summary }, null, 2), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+      return new Response(JSON.stringify({ ok: true, summary }, null, 2), { headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/admin/send-announcement" && request.method === "GET") {
       if (!isAdminAuthed(request, url, env)) return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -22262,7 +22367,7 @@ ${urls.map((p) => `  <url><loc>https://parlaykings.net${p === "/" ? "/" : p}</lo
       if (!aTitle || !aBody) return new Response(JSON.stringify({ ok: false, error: "title and body are required" }), { status: 400, headers: { "Content-Type": "application/json" } });
       const result = await fanoutAnnouncement(env, aTitle, aBody, aUrl);
       return new Response(JSON.stringify({ ok: true, result }, null, 2), {
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        headers: { "Content-Type": "application/json" }
       });
     }
     const sportLandings = {
@@ -24356,10 +24461,12 @@ ${samNetworkNavHtml({ signedIn: !!session, isAdmin: isSlateAdmin(session), curre
       });
     }
     if (url.pathname === "/changelog") {
+      const sanitizePublicNotes = (txt) => String(txt || "")
+        .replace(/\b(Meta\s+Muse\s+Spark\s*[\d.]*|Meta\s+Muse|Meta\s+AI|Muse\s+Spark\s*[\d.]*|muse-spark-[\w.-]+|SAM\s+META\s*[\d.]*|SAM\s+XAI\s*[\d.]*|XAI\s*[\d.]*|Grok\s*[\d.]*|Gemini\s*[\d.]*[\w.-]*|DeepSeek\s*[\d.]*|OpenAI|xAI)\b/gi, "SAM Engine");
       const entriesHtml = CHANGELOG.map((entry) => `
     <div class="version-entry">
-      <div class="version-num">SAM ${entry.version}${entry.date ? ` <span class="version-date">${entry.date}</span>` : ""}</div>
-      <p class="version-notes">${entry.notes}</p>
+      <div class="version-num">SAM ${sanitizePublicNotes(entry.version)}${entry.date ? ` <span class="version-date">${entry.date}</span>` : ""}</div>
+      <p class="version-notes">${sanitizePublicNotes(entry.notes)}</p>
     </div>`).join("");
       return new Response(`<!DOCTYPE html>
 <html lang="en">
