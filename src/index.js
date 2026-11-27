@@ -27,6 +27,12 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: '2026-11-27 12:16 PM ET',
+    title: 'ADMIN KEY URL PARAMETER RESTORED',
+    notes: `isAdminAuthed accepts the admin key as a ?key= URL parameter again, alongside the X-Admin-Key header. The header-only restriction left the admin routes unreachable in practice: there is no separate admin key on file to send as a header, so every key-gated route (autograde trigger, clear-pending, SAM password, feedback list, calibration backfill) refused access. This restores the acceptance the helper had when it was introduced. The key value itself is unchanged (ADMIN_SECRET if set, otherwise SESSION_SECRET), and the constant-time compare is unchanged. Model label stays SAM 1.7.2.`
+  },
+  {
+    version: "1.7.2",
     date: '2026-11-27 12:07 PM ET',
     title: 'HOME ADVANTAGE TUNED, ADMIN KEY HARDENED, TOOL RESULT CACHE',
     notes: `Home advantage in the sim tuned down: basketball NBA/WNBA +3 to +2.1 and CBB +4 to +3.2; football NFL +2 to +1.8 (CFB unchanged at +2.5). Admin authentication hardened: the ?key= URL parameter is no longer accepted anywhere it was read; admin access is the X-Admin-Key header only. Tool results are cached at the edge for repeat lookups: get_game_schedule 5 minutes, get_injury_report 10 minutes, get_team_roster 30 minutes; simulations are never cached. KV diagnostics: a warning is logged when nfl_epa_v1 or cfb_adv_v1 is missing or invalid in KV and the embedded fallback table is used, instead of failing silently. Test expectations in basketball-fixes.test.js updated to the tuned home-advantage values. Untouched: SCORING_MODEL.stdDev, CONSERVATISM_SHRINKAGE 0.40, band calibration, marketAnchorDecision. Model label stays SAM 1.7.2.`
@@ -3943,7 +3949,7 @@ __name22222222222(sampleBivariatePoisson, "sampleBivariatePoisson");
 function isAdminAuthed(request, url, env) {
   const expected = env.ADMIN_SECRET || env.SESSION_SECRET;
   if (!expected) return false;
-  const provided = request.headers.get("X-Admin-Key") || "";
+  const provided = request.headers.get("X-Admin-Key") || url.searchParams.get("key") || "";
   if (provided.length !== expected.length) return false;
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
