@@ -27,6 +27,12 @@ var __name22222222222 = /* @__PURE__ */ __name2222222222((target, value) => __de
 var CHANGELOG = [
   {
     version: "1.7.2",
+    date: '2026-11-27 10:40 PM ET',
+    title: 'BOARD ORDER — PENDING GAMES FIRST',
+    notes: `The daily board now lists pending games first, ordered by start time with the soonest upcoming game at the top; games that are final follow in start-time order. Applies to the member board (/api/landing-board) and the public board payload (/api/landing-data), so parlaykings.net and the grimaldi.tv Today's Board show the same order. The Highest Confidence sort is unchanged.`
+  },
+  {
+    version: "1.7.2",
     date: '2026-11-27 9:07 PM ET',
     title: 'GRIMALDI.TV BOARD UNLOCK — ONE LOGIN, BOTH SITES',
     notes: `Today's Board on grimaldi.tv now unlocks in place for members, the same as on parlaykings.net. /api/landing-board answers the https://grimaldi.tv origin (and www) with credentialed CORS, so after the existing /sso/handoff -> ai.grimaldi.tv /sso/consume hop plants the SAM session cookie on ai.grimaldi.tv, the grimaldi.tv page reads the same session-gated board: Premium rows open with the pick, the confidence, and the SAM 1.7.2 breakdown; free members keep the free three plus locked rows. The gate itself (boardVisiblePicks) is unchanged, signed-out requests still get a 401, and no other origin is granted.`
@@ -18220,6 +18226,8 @@ function sortByStartMs(pairs) {
   return pairs
     .map((pair, i) => ({ pair, i }))
     .sort((a, b) => {
+      const af = a.pair.fin ? 1 : 0, bf = b.pair.fin ? 1 : 0;
+      if (af !== bf) return af - bf;
       const am = a.pair.ms, bm = b.pair.ms;
       if (am == null && bm == null) return a.i - b.i;
       if (am == null) return 1;
@@ -18262,7 +18270,7 @@ function buildLandingBoard(records, fullAccess, logoDir, followsList, startsMap)
       };
       const st = startTimeOf(startsMap, p.league, p.matchup, boardDate);
       if (st) row.startTime = st;
-      return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate) };
+      return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate), fin: (row.result === "Win" || row.result === "Loss" || row.result === "Push") };
     })),
     locked: sortByStartMs(gated.locked.map((p) => {
       const lp = teamLogoPair(p.league, p.matchup, logoDir);
@@ -18362,7 +18370,7 @@ function buildLandingPayload(records, logoDir, startsMap) {
     const row = { league: p.league, matchup: p.matchup, pick: p.pick, confidence: p.confidence, logoA: lp ? lp.logoA : null, logoB: lp ? lp.logoB : null };
     const st = startTimeOf(startsMap, p.league, p.matchup, boardDate);
     if (st) row.startTime = st;
-    return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate) };
+    return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate), fin: (p.result === "Win" || p.result === "Loss" || p.result === "Push") };
   }));
   const freeSet = new Set(ranked.slice(0, 3));
   const slate = sortByStartMs(ranked.filter((p) => !freeSet.has(p)).slice(0, 24).map((p) => {
@@ -18370,7 +18378,7 @@ function buildLandingPayload(records, logoDir, startsMap) {
     const row = lp ? { league: p.league, matchup: p.matchup, logoA: lp.logoA, logoB: lp.logoB } : { league: p.league, matchup: p.matchup };
     const st = startTimeOf(startsMap, p.league, p.matchup, boardDate);
     if (st) row.startTime = st;
-    return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate) };
+    return { row, ms: startMsOf(startsMap, p.league, p.matchup, boardDate), fin: (p.result === "Win" || p.result === "Loss" || p.result === "Push") };
   }));
 
   const daily = [...byDay.entries()]
